@@ -5,10 +5,11 @@ import logging
 import os
 
 from aiogram import Bot, Dispatcher, F, Router
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 from dotenv import load_dotenv
 
+from config import LOG_LEVEL
 from core.pipeline.processor import MessageProcessor
 from interfaces.processor_factory import build_processor
 
@@ -37,6 +38,14 @@ async def handle_report_message(message: Message, processor: MessageProcessor) -
         await message.answer("Не смог собрать отчёт прямо сейчас. Попробуй ещё раз.")
 
 
+@router.message(CommandStart())
+async def cmd_start(message: Message) -> None:
+    await message.answer(
+        "Привет. Я SELF-OS — твой личный граф.\n"
+        "Просто напиши что думаешь или чувствуешь."
+    )
+
+
 @router.message(F.text)
 async def handle_text_message(message: Message, processor: MessageProcessor) -> None:
     await handle_incoming_message(message, processor)
@@ -54,12 +63,12 @@ async def run_bot() -> None:
         await dispatcher.start_polling(bot)
     finally:
         await bot.session.close()
-        await processor.graph_api.storage.close()
+        if hasattr(processor.graph_api.storage, "close"):
+            await processor.graph_api.storage.close()
 
 
 def main() -> None:
-    log_level = os.getenv("SELFOS_LOG_LEVEL", "INFO").upper()
-    logging.basicConfig(level=getattr(logging, log_level, logging.INFO))
+    logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO))
     asyncio.run(run_bot())
 
 
