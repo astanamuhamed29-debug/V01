@@ -74,19 +74,17 @@ class MessageProcessor:
         self.event_bus.publish("journal.appended", {"user_id": user_id, "text": text})
 
         intent = router.classify(text)
-        if self.use_llm:
-            llm_intent = await self._safe_llm_intent(text)
-            if llm_intent in router.INTENTS:
-                intent = llm_intent
 
         person = await self.graph_api.ensure_person_node(user_id)
 
-        semantic_nodes, semantic_edges = await self._extract_semantic(user_id, text, intent, person.id)
-        parts_nodes, parts_edges = await self._extract_parts(user_id, text, intent, person.id)
-        emotion_nodes, emotion_edges = await self._extract_emotion(user_id, text, intent, person.id)
-
-        nodes = [*semantic_nodes, *parts_nodes, *emotion_nodes]
-        edges = [*semantic_edges, *parts_edges, *emotion_edges]
+        nodes, edges, llm_intent = await self._extract_via_llm_all(
+            user_id=user_id,
+            text=text,
+            intent=intent,
+            person_id=person.id,
+        )
+        if llm_intent in router.INTENTS:
+            intent = llm_intent
 
         created_nodes, created_edges = await self.graph_api.apply_changes(user_id, nodes, edges)
 
@@ -137,78 +135,30 @@ class MessageProcessor:
             timestamp=timestamp,
         )
 
-    async def _safe_llm_intent(self, text: str) -> str | None:
-        try:
-            return await self.llm_client.classify_intent(text)
-        except Exception as exc:
-            logger.warning("LLM intent classification failed: %s", exc)
-            return None
-
-    async def _extract_semantic(self, user_id: str, text: str, intent: str, person_id: str) -> tuple[list[Node], list[Edge]]:
-        if self.use_llm:
-            try:
-                payload = await self.llm_client.extract_semantic(text, intent)
-            except Exception as exc:
-                logger.warning("LLM semantic extraction failed: %s", exc)
-                payload = {"nodes": [], "edges": []}
-            llm_nodes, llm_edges = await self._extract_via_llm(
-                user_id=user_id,
-                person_id=person_id,
-                payload=payload,
-                scope="semantic",
-            )
-            if llm_nodes or llm_edges:
-                return llm_nodes, llm_edges
-        return await extractor_semantic.extract(user_id, text, intent, person_id)
-
-    async def _extract_parts(self, user_id: str, text: str, intent: str, person_id: str) -> tuple[list[Node], list[Edge]]:
-        if self.use_llm:
-            try:
-                payload = await self.llm_client.extract_parts(text, intent)
-            except Exception as exc:
-                logger.warning("LLM parts extraction failed: %s", exc)
-                payload = {"nodes": [], "edges": []}
-            llm_nodes, llm_edges = await self._extract_via_llm(
-                user_id=user_id,
-                person_id=person_id,
-                payload=payload,
-                scope="parts",
-            )
-            if llm_nodes or llm_edges:
-                return llm_nodes, llm_edges
-        return await extractor_parts.extract(user_id, text, intent, person_id)
-
-    async def _extract_emotion(self, user_id: str, text: str, intent: str, person_id: str) -> tuple[list[Node], list[Edge]]:
-        if self.use_llm:
-            try:
-                payload = await self.llm_client.extract_emotion(text, intent)
-            except Exception as exc:
-                logger.warning("LLM emotion extraction failed: %s", exc)
-                payload = {"nodes": [], "edges": []}
-            llm_nodes, llm_edges = await self._extract_via_llm(
-                user_id=user_id,
-                person_id=person_id,
-                payload=payload,
-                scope="emotion",
-            )
-            if llm_nodes or llm_edges:
-                return llm_nodes, llm_edges
-        return await extractor_emotion.extract(user_id, text, intent, person_id)
-
-    async def _extract_via_llm(
+    async def _extract_via_llm_all(
         self,
         *,
         user_id: str,
+        text: str,
+        intent: str,
         person_id: str,
-        payload: dict | str,
-        scope: str,
-    ) -> tuple[list[Node], list[Edge]]:
-        try:
-            parsed = self._parse_json_payload(payload)
-        except Exception as exc:
-            logger.warning("Failed to parse LLM %s payload: %s", scope, exc)
-            return [], []
-        return self._map_payload_to_graph(user_id=user_id, person_id=person_id, data=parsed)
+    ) -> tuple[list[Node], list[Edge], str | None]:
+        if self.use_llm:
+            try:
+                logger.info("LLM extract_all call")
+                payload = await self.llm_client.extract_all(text, intent)
+                parsed = self._parse_json_payload(payload)
+                llm_nodes, llm_edges = self._map_payload_to_graph(user_id=user_id, person_id=person_id, data=parsed)
+                if llm_nodes or llm_edges:
+                    llm_intent = str(parsed.get("intent", "")).upper()
+                    return llm_nodes, llm_edges, llm_intent
+            except Exception as exc:
+                logger.warning("Failed LLM extract_all path: %s", exc)
+
+        semantic_nodes, semantic_edges = await extractor_semantic.extract(user_id, text, intent, person_id)
+        parts_nodes, parts_edges = await extractor_parts.extract(user_id, text, intent, person_id)
+        emotion_nodes, emotion_edges = await extractor_emotion.extract(user_id, text, intent, person_id)
+        return [*semantic_nodes, *parts_nodes, *emotion_nodes], [*semantic_edges, *parts_edges, *emotion_edges], None
 
     def _parse_json_payload(self, payload: dict | str) -> dict:
         if isinstance(payload, dict):

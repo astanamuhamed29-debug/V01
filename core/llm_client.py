@@ -12,6 +12,8 @@ from core.llm.prompts import SYSTEM_PROMPT_EXTRACTOR
 class LLMClient(Protocol):
     async def classify_intent(self, text: str) -> str: ...
 
+    async def extract_all(self, text: str, intent: str) -> dict[str, Any] | str: ...
+
     async def extract_semantic(self, text: str, intent: str) -> dict[str, Any] | str: ...
 
     async def extract_parts(self, text: str, intent: str) -> dict[str, Any] | str: ...
@@ -29,6 +31,9 @@ class MockLLMClient:
         if any(word in lowered for word in ["идея", "придумал"]):
             return "IDEA"
         return "REFLECTION"
+
+    async def extract_all(self, text: str, intent: str) -> dict[str, Any]:
+        return {"nodes": [], "edges": []}
 
     async def extract_semantic(self, text: str, intent: str) -> dict[str, Any]:
         return {"nodes": [], "edges": []}
@@ -74,6 +79,17 @@ class OpenRouterQwenClient:
         except json.JSONDecodeError:
             pass
         return "REFLECTION"
+
+    async def extract_all(self, text: str, intent: str) -> dict[str, Any] | str:
+        payload = {
+            "task": "extract_all",
+            "text": text,
+            "intent": intent,
+        }
+        raw = await self._chat_json(payload)
+        if not raw:
+            return {"nodes": [], "edges": []}
+        return raw
 
     async def extract_semantic(self, text: str, intent: str) -> dict[str, Any] | str:
         return await self._extract_by_scope(text=text, intent=intent, scope="semantic")
