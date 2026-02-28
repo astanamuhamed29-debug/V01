@@ -3,13 +3,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 from dotenv import load_dotenv
 
+from core.analytics.calibrator import ThresholdCalibrator
 from config import LOG_LEVEL
 from core.analytics.pattern_analyzer import PatternAnalyzer
 from core.pipeline.processor import MessageProcessor
@@ -169,16 +171,60 @@ async def handle_text_message(message: Message, processor: MessageProcessor) -> 
     await handle_incoming_message(message, processor)
 
 
+@router.callback_query(F.data.startswith("fb:"))
+async def handle_feedback_callback(call: CallbackQuery, processor: MessageProcessor) -> None:
+    """Принимает 👍/👎 оценку проактивного сообщения."""
+    if call.from_user is None or call.data is None:
+        return
+
+    parts = call.data.split(":")
+    if len(parts) < 5:
+        return
+
+    _, helpful_str, signal_type, score_str, ts_str = parts[:5]
+    user_id = str(call.from_user.id)
+
+    try:
+        was_helpful = helpful_str == "1"
+        score = float(score_str)
+        sent_at = datetime.fromtimestamp(int(ts_str), tz=timezone.utc).isoformat()
+
+        await processor.graph_api.storage.save_signal_feedback(
+            user_id=user_id,
+            signal_type=signal_type,
+            signal_score=score,
+            was_helpful=was_helpful,
+            sent_at=sent_at,
+        )
+
+        if hasattr(processor, "calibrator") and processor.calibrator:
+            await processor.calibrator.load(user_id)
+
+        reply = "Спасибо, запомню 👌" if was_helpful else "Понял, буду точнее 🙏"
+        await call.answer(reply)
+        if call.message:
+            await call.message.edit_reply_markup(reply_markup=None)
+    except Exception as exc:
+        logger.warning("feedback callback failed: %s", exc)
+        await call.answer("Не смог сохранить оценку")
+
+
 async def run_bot() -> None:
     token = _get_bot_token()
     bot = Bot(token=token)
     processor = build_processor()
     if not hasattr(processor, "pattern_analyzer"):
-        processor.pattern_analyzer = PatternAnalyzer(processor.graph_api.storage)
+        processor.pattern_analyzer = PatternAnalyzer(
+            processor.graph_api.storage,
+            embedding_service=getattr(processor, "embedding_service", None),
+        )
+    calibrator = ThresholdCalibrator(processor.graph_api.storage)
+    processor.calibrator = calibrator
     scheduler = ProactiveScheduler(
         bot=bot,
         storage=processor.graph_api.storage,
         analyzer=processor.pattern_analyzer,
+        calibrator=calibrator,
     )
     dispatcher = Dispatcher()
     dispatcher["processor"] = processor

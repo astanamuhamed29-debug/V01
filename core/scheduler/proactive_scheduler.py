@@ -18,13 +18,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
 if TYPE_CHECKING:
     from aiogram import Bot
 
+    from core.analytics.calibrator import ThresholdCalibrator
     from core.analytics.pattern_analyzer import PatternAnalyzer, PatternReport
     from core.graph.storage import GraphStorage
 
@@ -244,14 +248,17 @@ class ProactiveScheduler:
         bot: "Bot",
         storage: "GraphStorage",
         analyzer: "PatternAnalyzer",
+        calibrator: "ThresholdCalibrator | None" = None,
         check_interval: int = CHECK_INTERVAL,
     ) -> None:
         self.bot = bot
         self.storage = storage
         self.analyzer = analyzer
+        self._calibrator = calibrator
         self.check_interval = check_interval
         self._detector = SignalDetector()
         self._task: asyncio.Task | None = None
+        self._calibrated_users: set[str] = set()
 
     def start(self) -> None:
         if self._task is not None and not self._task.done():
@@ -292,6 +299,13 @@ class ProactiveScheduler:
                 logger.warning("ProactiveScheduler failed for user=%s: %s", user_id, exc)
 
     async def _check_user(self, user_id: str, now: datetime) -> None:
+        if self._calibrator and user_id not in self._calibrated_users:
+            try:
+                await self._calibrator.load(user_id)
+                self._calibrated_users.add(user_id)
+            except Exception as exc:
+                logger.warning("Calibrator load failed for user=%s: %s", user_id, exc)
+
         last_activity = await self.storage.get_last_activity_at(user_id)
         if last_activity is None:
             return
@@ -320,7 +334,12 @@ class ProactiveScheduler:
             return
 
         signals = self._detector.detect(report)
-        best = next((item for item in signals if item.score >= SIGNAL_THRESHOLD), None)
+        best: ProactiveSignal | None = None
+        for signal in signals:
+            threshold = self._calibrator.get_threshold(signal.signal_type) if self._calibrator else SIGNAL_THRESHOLD
+            if signal.score >= threshold:
+                best = signal
+                break
 
         now_iso = now.isoformat()
         if best is None:
@@ -329,7 +348,11 @@ class ProactiveScheduler:
             return
 
         try:
-            await self.bot.send_message(chat_id=int(user_id), text=best.message)
+            await self.bot.send_message(
+                chat_id=int(user_id),
+                text=best.message,
+                reply_markup=_make_feedback_keyboard(best.signal_type, best.score),
+            )
             logger.info(
                 "Proactive message sent to user=%s type=%s score=%.2f",
                 user_id,
@@ -353,3 +376,21 @@ def _parse_iso(value: str) -> datetime:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt
+
+
+def _make_feedback_keyboard(signal_type: str, score: float) -> InlineKeyboardMarkup:
+    ts = int(time.time())
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Точно 👍",
+                    callback_data=f"fb:1:{signal_type}:{score:.2f}:{ts}",
+                ),
+                InlineKeyboardButton(
+                    text="Не очень 👎",
+                    callback_data=f"fb:0:{signal_type}:{score:.2f}:{ts}",
+                ),
+            ]
+        ]
+    )

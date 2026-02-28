@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import datetime, timezone
+import math
 from pathlib import Path
+from uuid import uuid4
 
 import aiosqlite
 
@@ -105,8 +107,25 @@ class GraphStorage:
                     last_checked_at TEXT,
                     total_sent INTEGER NOT NULL DEFAULT 0
                 );
+
+                CREATE TABLE IF NOT EXISTS signal_feedback (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    signal_type TEXT NOT NULL,
+                    signal_score REAL NOT NULL,
+                    was_helpful INTEGER NOT NULL,
+                    sent_at TEXT NOT NULL,
+                    feedback_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_signal_feedback_user_type
+                    ON signal_feedback(user_id, signal_type);
                 """
             )
+            try:
+                await conn.execute("ALTER TABLE nodes ADD COLUMN embedding_json TEXT")
+            except Exception:
+                pass
             await conn.commit()
             self._initialized = True
 
@@ -129,11 +148,16 @@ class GraphStorage:
             existing = await cursor.fetchone()
             canonical_id = existing["id"] if existing else node.id
             created_at = existing["created_at"] if existing else node.created_at
+            embedding_json = (
+                json.dumps(node.embedding)
+                if node.embedding is not None
+                else (existing["embedding_json"] if existing else None)
+            )
 
             await conn.execute(
                 """
-                INSERT OR REPLACE INTO nodes (id, user_id, type, name, text, subtype, key, metadata_json, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO nodes (id, user_id, type, name, text, subtype, key, metadata_json, created_at, embedding_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     canonical_id,
@@ -145,6 +169,7 @@ class GraphStorage:
                     node.key,
                     json.dumps(node_metadata, ensure_ascii=False),
                     created_at,
+                    embedding_json,
                 ),
             )
             await conn.commit()
@@ -158,16 +183,22 @@ class GraphStorage:
                 key=node.key,
                 metadata=node_metadata,
                 created_at=created_at,
+                embedding=node.embedding if node.embedding is not None else (json.loads(embedding_json) if embedding_json else None),
             )
 
-        cursor = await conn.execute("SELECT created_at FROM nodes WHERE id = ?", (node.id,))
+        cursor = await conn.execute("SELECT created_at, embedding_json FROM nodes WHERE id = ?", (node.id,))
         existing = await cursor.fetchone()
         created_at = existing["created_at"] if existing else node.created_at
+        embedding_json = (
+            json.dumps(node.embedding)
+            if node.embedding is not None
+            else (existing["embedding_json"] if existing else None)
+        )
 
         await conn.execute(
             """
-            INSERT OR REPLACE INTO nodes (id, user_id, type, name, text, subtype, key, metadata_json, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO nodes (id, user_id, type, name, text, subtype, key, metadata_json, created_at, embedding_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 node.id,
@@ -179,6 +210,7 @@ class GraphStorage:
                 None,
                 json.dumps(node_metadata, ensure_ascii=False),
                 created_at,
+                embedding_json,
             ),
         )
         await conn.commit()
@@ -192,6 +224,7 @@ class GraphStorage:
             key=None,
             metadata=node_metadata,
             created_at=created_at,
+            embedding=node.embedding if node.embedding is not None else (json.loads(embedding_json) if embedding_json else None),
         )
 
     async def upsert_nodes_batch(self, nodes_data: list[tuple[Node, dict]]) -> list[Node]:
@@ -209,7 +242,7 @@ class GraphStorage:
             for node, node_metadata in nodes_data:
                 if node.key:
                     cursor = await conn.execute(
-                        "SELECT id, created_at FROM nodes "
+                        "SELECT id, created_at, embedding_json FROM nodes "
                         "WHERE user_id = ? AND type = ? AND key = ?",
                         (node.user_id, node.type, node.key),
                     )
@@ -218,17 +251,22 @@ class GraphStorage:
                     created_at = existing["created_at"] if existing else node.created_at
                 else:
                     cursor = await conn.execute(
-                        "SELECT created_at FROM nodes WHERE id = ?", (node.id,)
+                        "SELECT created_at, embedding_json FROM nodes WHERE id = ?", (node.id,)
                     )
                     existing = await cursor.fetchone()
                     canonical_id = node.id
                     created_at = existing["created_at"] if existing else node.created_at
+                embedding_json = (
+                    json.dumps(node.embedding)
+                    if node.embedding is not None
+                    else (existing["embedding_json"] if existing else None)
+                )
 
                 await conn.execute(
                     """
                     INSERT OR REPLACE INTO nodes
-                      (id, user_id, type, name, text, subtype, key, metadata_json, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                      (id, user_id, type, name, text, subtype, key, metadata_json, created_at, embedding_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         canonical_id,
@@ -240,6 +278,7 @@ class GraphStorage:
                         node.key,
                         json.dumps(node_metadata, ensure_ascii=False),
                         created_at,
+                        embedding_json,
                     ),
                 )
                 saved.append(
@@ -253,6 +292,7 @@ class GraphStorage:
                         key=node.key,
                         metadata=node_metadata,
                         created_at=created_at,
+                        embedding=node.embedding if node.embedding is not None else (json.loads(embedding_json) if embedding_json else None),
                     )
                 )
             await conn.commit()
@@ -597,8 +637,123 @@ class GraphStorage:
             )
         await conn.commit()
 
+    async def save_signal_feedback(
+        self,
+        user_id: str,
+        signal_type: str,
+        signal_score: float,
+        was_helpful: bool,
+        sent_at: str,
+    ) -> None:
+        await self._ensure_initialized()
+        conn = await self._get_conn()
+        await conn.execute(
+            """
+            INSERT INTO signal_feedback (
+                id, user_id, signal_type, signal_score, was_helpful, sent_at, feedback_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(uuid4()),
+                user_id,
+                signal_type,
+                float(signal_score),
+                1 if was_helpful else 0,
+                sent_at,
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        await conn.commit()
+
+    async def get_signal_feedback(
+        self,
+        user_id: str,
+        signal_type: str | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        await self._ensure_initialized()
+        conn = await self._get_conn()
+        if signal_type:
+            cursor = await conn.execute(
+                """
+                SELECT * FROM signal_feedback
+                WHERE user_id = ? AND signal_type = ?
+                ORDER BY feedback_at DESC
+                LIMIT ?
+                """,
+                (user_id, signal_type, limit),
+            )
+        else:
+            cursor = await conn.execute(
+                """
+                SELECT * FROM signal_feedback
+                WHERE user_id = ?
+                ORDER BY feedback_at DESC
+                LIMIT ?
+                """,
+                (user_id, limit),
+            )
+        rows = await cursor.fetchall()
+        return [
+            {
+                **dict(row),
+                "was_helpful": bool(row["was_helpful"]),
+            }
+            for row in rows
+        ]
+
+    async def save_node_embedding(self, node_id: str, embedding: list[float]) -> None:
+        """Сохраняет embedding отдельно, не трогая остальные поля."""
+        await self._ensure_initialized()
+        conn = await self._get_conn()
+        await conn.execute(
+            "UPDATE nodes SET embedding_json = ? WHERE id = ?",
+            (json.dumps(embedding), node_id),
+        )
+        await conn.commit()
+
+    async def find_similar_nodes(
+        self,
+        user_id: str,
+        query_embedding: list[float],
+        top_k: int = 5,
+        node_types: list[str] | None = None,
+        min_similarity: float = 0.75,
+    ) -> list[tuple[Node, float]]:
+        """
+        Косинусное сходство без NumPy — через stdlib math.
+        Возвращает [(node, similarity_score), ...] отсортированный DESC.
+        Загружает только узлы у которых есть embedding_json.
+        """
+        await self._ensure_initialized()
+        conn = await self._get_conn()
+
+        query = "SELECT * FROM nodes WHERE user_id = ? AND embedding_json IS NOT NULL"
+        params: list[object] = [user_id]
+        if node_types:
+            placeholders = ",".join("?" * len(node_types))
+            query += f" AND type IN ({placeholders})"
+            params.extend(node_types)
+
+        cursor = await conn.execute(query, params)
+        rows = await cursor.fetchall()
+
+        results: list[tuple[Node, float]] = []
+        for row in rows:
+            node = _row_to_node(row)
+            if node.embedding is None:
+                continue
+            sim = _cosine_similarity(query_embedding, node.embedding)
+            if sim >= min_similarity:
+                results.append((node, sim))
+
+        results.sort(key=lambda item: item[1], reverse=True)
+        return results[:top_k]
+
 
 def _row_to_node(row: aiosqlite.Row) -> Node:
+    embedding_raw = row["embedding_json"] if "embedding_json" in row.keys() else None
+    embedding = json.loads(embedding_raw) if embedding_raw else None
     return Node(
         id=row["id"],
         user_id=row["user_id"],
@@ -609,6 +764,7 @@ def _row_to_node(row: aiosqlite.Row) -> Node:
         key=row["key"],
         metadata=json.loads(row["metadata_json"]),
         created_at=row["created_at"],
+        embedding=embedding,
     )
 
 
@@ -622,3 +778,15 @@ def _row_to_edge(row: aiosqlite.Row) -> Edge:
         metadata=json.loads(row["metadata_json"]),
         created_at=row["created_at"],
     )
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    """Stdlib-only cosine similarity."""
+    if len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(y * y for y in b))
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)

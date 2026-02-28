@@ -9,8 +9,9 @@ from typing import cast
 import networkx as nx  # type: ignore[import-not-found]
 from networkx.algorithms import community  # type: ignore[import-not-found]
 
-from core.graph.model import Edge, Node
-from core.graph.storage import GraphStorage
+from core.graph.model import Edge, Node, edge_weight
+from core.graph.storage import GraphStorage, _cosine_similarity
+from core.llm.embedding_service import EmbeddingService
 
 
 @dataclass(slots=True)
@@ -22,6 +23,7 @@ class TriggerPattern:
     occurrences: int
     first_seen: str
     last_seen: str
+    weighted_score: float = 0.0
 
 
 @dataclass(slots=True)
@@ -104,8 +106,9 @@ class PatternAnalyzer:
         "personalization": "персонализация",
     }
 
-    def __init__(self, storage: GraphStorage) -> None:
+    def __init__(self, storage: GraphStorage, embedding_service: EmbeddingService | None = None) -> None:
         self.storage = storage
+        self.embedding_service = embedding_service
         self._node_cache: dict[str, Node] = {}
         # NOTE: improved repeated node lookup latency with in-memory node cache.
 
@@ -148,8 +151,9 @@ class PatternAnalyzer:
             gathered,
         )
 
+        graph = self._build_nx_graph(all_nodes, all_edges)
         syndromes = self._find_syndromes(all_nodes, all_edges)
-        implicit_links = self._predict_implicit_links(all_nodes, all_edges)
+        implicit_links = await self._predict_implicit_links(user_id, graph, all_nodes, all_edges)
 
         total_nodes = await self._count_nodes(user_id)
         has_enough = total_nodes > 10
@@ -172,10 +176,22 @@ class PatternAnalyzer:
         graph = nx.Graph()
         for node in nodes:
             name = (node.name or node.key or node.text or node.id)[:50]
-            graph.add_node(node.id, type=node.type, name=name, created_at=node.created_at)
+            graph.add_node(
+                node.id,
+                type=node.type,
+                name=name,
+                created_at=node.created_at,
+                embedding=node.embedding or [],
+            )
         for edge in edges:
             if graph.has_node(edge.source_node_id) and graph.has_node(edge.target_node_id):
-                graph.add_edge(edge.source_node_id, edge.target_node_id, relation=edge.relation)
+                graph.add_edge(
+                    edge.source_node_id,
+                    edge.target_node_id,
+                    relation=edge.relation,
+                    weight=edge_weight(edge),
+                    created_at=edge.created_at,
+                )
         return graph
 
     def _find_syndromes(self, nodes: list[Node], edges: list[Edge]) -> list[Syndrome]:
@@ -185,7 +201,7 @@ class PatternAnalyzer:
             return []
 
         try:
-            communities = community.greedy_modularity_communities(graph)
+            communities = community.greedy_modularity_communities(graph, weight="weight")
         except Exception:
             return []
 
@@ -217,9 +233,14 @@ class PatternAnalyzer:
         syndromes.sort(key=lambda item: item.score, reverse=True)
         return syndromes
 
-    def _predict_implicit_links(self, nodes: list[Node], edges: list[Edge]) -> list[ImplicitLink]:
+    async def _predict_implicit_links(
+        self,
+        user_id: str,
+        graph: nx.Graph,
+        nodes: list[Node],
+        edges: list[Edge],
+    ) -> list[ImplicitLink]:
         """Использует Adamic-Adar для предсказания неочевидных связей."""
-        graph = self._build_nx_graph(nodes, edges)
         if len(graph.nodes) < 10:
             return []
 
@@ -250,8 +271,72 @@ class PatternAnalyzer:
                 )
             )
 
-        links.sort(key=lambda item: item.probability_score, reverse=True)
-        return links[:5]
+        semantic_links = await self._predict_semantic_links(user_id, graph)
+        all_links = links + semantic_links
+        dedup: dict[tuple[str, str], ImplicitLink] = {}
+        for link in all_links:
+            endpoints = sorted([f"{link.source_type}:{link.source_name}", f"{link.target_type}:{link.target_name}"])
+            key = (endpoints[0], endpoints[1])
+            existing = dedup.get(key)
+            if existing is None or link.probability_score > existing.probability_score:
+                dedup[key] = link
+
+        merged = list(dedup.values())
+        merged.sort(key=lambda item: item.probability_score, reverse=True)
+        return merged[:5]
+
+    async def _predict_semantic_links(
+        self,
+        user_id: str,
+        graph: nx.Graph,
+    ) -> list[ImplicitLink]:
+        """
+        Семантические скрытые связи через embedding similarity.
+        Работает только если EmbeddingService доступен.
+        """
+        if self.embedding_service is None:
+            return []
+
+        semantic_pairs = [
+            ({"THOUGHT", "BELIEF"}, {"NEED"}),
+            ({"PART"}, {"NEED"}),
+            ({"EVENT"}, {"BELIEF"}),
+        ]
+
+        results: list[ImplicitLink] = []
+        for source_types, target_types in semantic_pairs:
+            source_nodes = [
+                (node_id, data)
+                for node_id, data in graph.nodes(data=True)
+                if data.get("type") in source_types and data.get("embedding")
+            ]
+            target_nodes = [
+                (node_id, data)
+                for node_id, data in graph.nodes(data=True)
+                if data.get("type") in target_types and data.get("embedding")
+            ]
+            for source_id, source_data in source_nodes:
+                for target_id, target_data in target_nodes:
+                    if source_id == target_id or graph.has_edge(source_id, target_id):
+                        continue
+                    sim = _cosine_similarity(
+                        list(source_data.get("embedding", [])),
+                        list(target_data.get("embedding", [])),
+                    )
+                    if sim >= 0.8:
+                        results.append(
+                            ImplicitLink(
+                                source_name=source_data.get("name", ""),
+                                target_name=target_data.get("name", ""),
+                                source_type=source_data.get("type", ""),
+                                target_type=target_data.get("type", ""),
+                                probability_score=round(sim, 3),
+                                reason="семантически схожи (embedding)",
+                            )
+                        )
+
+        results.sort(key=lambda item: item.probability_score, reverse=True)
+        return results[:5]
 
     async def _find_trigger_patterns(self, user_id: str, since_iso: str) -> list[TriggerPattern]:
         edges = await self.storage.get_edges_by_relation(user_id, "TRIGGERS")
@@ -294,9 +379,11 @@ class PatternAnalyzer:
                     "first_seen": created_at,
                     "last_seen": created_at,
                     "occurrences": 1,
+                    "weighted_score": edge_weight(edge),
                 }
             else:
                 bucket["occurrences"] += 1
+                bucket["weighted_score"] = float(bucket.get("weighted_score", 0.0)) + edge_weight(edge)
                 if self._is_after(bucket["first_seen"], created_at):
                     bucket["first_seen"] = created_at
                 if self._is_after(created_at, bucket["last_seen"]):
@@ -313,12 +400,14 @@ class PatternAnalyzer:
                     target_type=target_type,
                     target_name=bucket["target_name"],
                     occurrences=bucket["occurrences"],
+                    weighted_score=float(bucket.get("weighted_score", 0.0)),
                     first_seen=bucket["first_seen"],
                     last_seen=bucket["last_seen"],
                 )
             )
 
-        result.sort(key=lambda item: item.occurrences, reverse=True)
+        # NOTE: improved trigger pattern ranking with temporal weights.
+        result.sort(key=lambda item: item.weighted_score, reverse=True)
         return result
 
     async def _build_need_profile(self, user_id: str, since_iso: str) -> list[NeedProfile]:

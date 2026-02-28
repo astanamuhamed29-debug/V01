@@ -13,6 +13,7 @@ from core.context.builder import GraphContextBuilder
 from core.graph.api import GraphAPI
 from core.graph.model import Edge, Node
 from core.journal.storage import JournalStorage
+from core.llm.embedding_service import EmbeddingService
 from core.llm_client import LLMClient, MockLLMClient
 from core.llm.parser import (
     ALLOWED_EDGE_RELATIONS,
@@ -56,6 +57,7 @@ class MessageProcessor:
         graph_api: GraphAPI,
         journal: JournalStorage,
         llm_client: LLMClient | None = None,
+        embedding_service: EmbeddingService | None = None,
         use_llm: bool | None = None,
         event_bus: EventBus | None = None,
     ) -> None:
@@ -64,9 +66,11 @@ class MessageProcessor:
         self.llm_client = llm_client or MockLLMClient()
         self.use_llm = USE_LLM if use_llm is None else use_llm
         self.event_bus = event_bus or EventBus()
+        self.embedding_service = embedding_service
         self.mood_tracker = MoodTracker(graph_api.storage)
         self.parts_memory = PartsMemory(graph_api.storage)
-        self.context_builder = GraphContextBuilder(graph_api.storage)
+        self.context_builder = GraphContextBuilder(graph_api.storage, embedding_service=self.embedding_service)
+        self.pattern_analyzer = self.context_builder.pattern_analyzer
         self.live_reply_enabled: bool = os.getenv("LIVE_REPLY_ENABLED", "true").lower() == "true"
 
     async def process_message(
@@ -116,6 +120,8 @@ class MessageProcessor:
                 intent = llm_intent
 
         created_nodes, created_edges = await self.graph_api.apply_changes(user_id, nodes, edges)
+        if self.embedding_service:
+            asyncio.create_task(self._embed_and_save_nodes(created_nodes))
 
         tasks = [node for node in created_nodes if node.type == "TASK"]
         current_projects = [node for node in created_nodes if node.type == "PROJECT"]
@@ -203,6 +209,16 @@ class MessageProcessor:
         )
 
         return ProcessResult(intent=intent, reply_text=final_reply, nodes=created_nodes, edges=created_edges)
+
+    async def _embed_and_save_nodes(self, nodes: list[Node]) -> None:
+        if not self.embedding_service:
+            return
+        try:
+            embeddings = await self.embedding_service.embed_nodes(nodes)
+            for node_id, embedding in embeddings.items():
+                await self.graph_api.storage.save_node_embedding(node_id, embedding)
+        except Exception as exc:
+            logger.warning("Background embedding failed: %s", exc)
 
     async def build_weekly_report(self, user_id: str) -> str:
         now = datetime.now(timezone.utc)

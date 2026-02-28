@@ -6,14 +6,15 @@ from datetime import datetime, timezone
 
 from core.analytics.pattern_analyzer import PatternAnalyzer, PatternReport
 from core.graph.storage import GraphStorage
+from core.llm.embedding_service import EmbeddingService
 
 logger = logging.getLogger(__name__)
 
 
 class GraphContextBuilder:
-    def __init__(self, storage: GraphStorage) -> None:
+    def __init__(self, storage: GraphStorage, embedding_service: EmbeddingService | None = None) -> None:
         self.storage = storage
-        self.pattern_analyzer = PatternAnalyzer(storage)
+        self.pattern_analyzer = PatternAnalyzer(storage, embedding_service=embedding_service)
 
     async def build(self, user_id: str) -> dict:
         """
