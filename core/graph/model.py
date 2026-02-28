@@ -13,6 +13,7 @@ NodeType = Literal[
     "TASK",
     "BELIEF",
     "THOUGHT",
+    "NEED",
     "VALUE",
     "PART",
     "EVENT",
@@ -36,6 +37,8 @@ EdgeRelation = Literal[
     "TRIGGERED_BY",
     "TRIGGERS",
     "PROTECTS",
+    "PROTECTS_NEED",
+    "SIGNALS_NEED",
     "CONFLICTS_WITH",
     "SUPPORTS",
 ]

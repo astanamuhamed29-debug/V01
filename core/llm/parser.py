@@ -18,6 +18,7 @@ ALLOWED_NODE_TYPES = {
     "TASK",
     "BELIEF",
     "THOUGHT",
+    "NEED",
     "VALUE",
     "PART",
     "EVENT",
@@ -40,6 +41,8 @@ ALLOWED_EDGE_RELATIONS = {
     "TRIGGERED_BY",
     "TRIGGERS",
     "PROTECTS",
+    "PROTECTS_NEED",
+    "SIGNALS_NEED",
     "CONFLICTS_WITH",
     "SUPPORTS",
 }
