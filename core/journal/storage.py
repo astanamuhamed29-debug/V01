@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import sqlite3
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -57,7 +58,7 @@ class JournalStorage:
                     "ALTER TABLE journal_entries ADD COLUMN session_id TEXT",
                     "ALTER TABLE journal_entries ADD COLUMN cognitive_load REAL",
                 ]:
-                    with contextlib.suppress(Exception):
+                    with contextlib.suppress(sqlite3.OperationalError):
                         await conn.execute(stmt)
                 await conn.commit()
             self._initialized = True

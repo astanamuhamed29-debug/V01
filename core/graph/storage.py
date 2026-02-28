@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import sqlite3
 from datetime import datetime, timezone
 import math
 from pathlib import Path
@@ -133,10 +135,8 @@ class GraphStorage:
                 "ALTER TABLE mood_snapshots ADD COLUMN feedback_score INTEGER",
             ]
             for stmt in _migrations:
-                try:
+                with contextlib.suppress(sqlite3.OperationalError):
                     await conn.execute(stmt)
-                except Exception:
-                    pass  # column already exists
 
             # intervention_outcomes — minimal OutcomeTracker table
             await conn.execute(
