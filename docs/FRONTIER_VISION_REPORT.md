@@ -527,15 +527,16 @@ class OutcomeTracker:
 
 **Что создать:**
 
-| Интерфейс / Модуль | Действие |
-|---|---|
-| `core/memory/consolidator.py` | **Создать** `MemoryConsolidator` с методами `consolidate()`, `abstract()`, `forget()` |
-| `core/memory/reconsolidation.py` | **Создать** `ReconsolidationEngine` |
-| `core/graph/model.py` | **Расширить** `Node.metadata` полями `review_count`, `salience_score`, `abstraction_level` |
-| `core/graph/storage.py` | **Добавить** `soft_delete_node()`, `merge_nodes()`, `get_nodes_by_retention()` |
-| Scheduler | **Добавить** `core/scheduler/memory_scheduler.py` — APScheduler задачи |
-| **SQLite → FalkorDB** | Начать миграцию Semantic Memory (BELIEF, NEED, VALUE, PART) в FalkorDB |
-| **Embeddings → Qdrant** | Вынести векторы из `node.embedding` в Qdrant коллекцию `self_os_nodes` |
+| Интерфейс / Модуль | Действие | Статус |
+|---|---|---|
+| `core/memory/consolidator.py` | **Создать** `MemoryConsolidator` с методами `consolidate()`, `abstract()`, `forget()` | ✅ Done |
+| `core/memory/reconsolidation.py` | **Создать** `ReconsolidationEngine` | ✅ Done |
+| `core/graph/model.py` | **Расширить** `Node.metadata` полями `review_count`, `salience_score`, `abstraction_level` | ✅ Done |
+| `core/graph/storage.py` | **Добавить** `soft_delete_node()`, `merge_nodes()`, `get_nodes_by_retention()` | ✅ Done |
+| Scheduler | **Добавить** `core/scheduler/memory_scheduler.py` — APScheduler задачи | ✅ Done |
+| **SQLite → Neo4j** | Миграция Semantic Memory (BELIEF, NEED, VALUE, PART) в Neo4j (`core/graph/neo4j_storage.py`) | ✅ Done |
+| **Embeddings → Qdrant** | Вынести векторы из `node.embedding` в Qdrant коллекцию `self_os_nodes` (`core/search/qdrant_storage.py`) | ✅ Done |
+| **LLM Abstraction** | `abstract()` с LLM-суммаризацией кластеров убеждений в архетипы | ✅ Done |
 
 **Что убить:** `core/graph/storage.py` — метод сохранения `embedding` в SQLite (перенести в Qdrant).
 
@@ -606,7 +607,7 @@ ALTER TABLE journal_entries ADD COLUMN cognitive_load REAL;
 | `core/theory_of_mind/user_model.py` | **Создать** `EpistemicStateModel` |
 | `core/therapy/self_agent.py` | **Создать** `TherapeuticSelf` — мета-агент, координирующий всё |
 | `agents/reply_minimal.py` | **Полностью переписать** — от шаблонов к `TherapeuticSelf.generate()` |
-| **Neo4j / FalkorDB** | Полная миграция графа; SQLite остаётся только для journal |
+| **Neo4j** | Полная миграция графа; SQLite остаётся только для journal |
 | **Active Inference (pymdp)** | Интеграция Free Energy minimization для выбора интервенций |
 
 **Финальная архитектура Stage 5:**
@@ -644,15 +645,15 @@ User Message
 
 | Слой | Текущий | Target (Stage 5) |
 |---|---|---|
-| Graph DB | SQLite | FalkorDB (Redis-native граф) + SQLite (journal) |
-| Vector DB | SQLite blob | Qdrant (ANN search, temporal filtering) |
+| Graph DB | SQLite + Neo4j (semantic) | Neo4j (semantic graph) + SQLite (journal) |
+| Vector DB | SQLite blob + Qdrant | Qdrant (ANN search, temporal filtering) |
 | Embeddings | OpenAI text-embedding | Jina v3 (1024-d) / text-embedding-3-large (3072-d) |
 | LLM | OpenRouter / Qwen | Multi-model: Qwen (fast), Claude-3.7 (therapy), GPT-4.1 (synthesis) |
-| Memory | Append-only graph | MemoryConsolidator + Hierarchical Memory |
+| Memory | MemoryConsolidator + Scheduler | MemoryConsolidator + Hierarchical Memory |
 | Prediction | None | Mamba SSM → Active Inference (pymdp) |
 | Agent Framework | Custom orchestrator | LangGraph + AutoGen (debate loops) |
 | Therapy Logic | Template replies | TherapeuticSelf + TherapyPlanner (RLHF-lite) |
-| Neurosymbolic | None | KG reasoning (FalkorDB Cypher) + LLM hybrid |
+| Neurosymbolic | None | KG reasoning (Neo4j Cypher) + LLM hybrid |
 
 ---
 

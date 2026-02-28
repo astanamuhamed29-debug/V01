@@ -67,10 +67,19 @@ class MemoryConsolidator:
     ----------
     storage:
         The :class:`~core.graph.storage.GraphStorage` instance.
+    llm_client:
+        Optional LLM client for abstraction summarisation.  When
+        ``None``, :meth:`abstract` falls back to counting candidates
+        without actually merging them.
     """
 
-    def __init__(self, storage: GraphStorage) -> None:
+    def __init__(
+        self,
+        storage: GraphStorage,
+        llm_client: object | None = None,
+    ) -> None:
         self.storage = storage
+        self._llm_client = llm_client
 
     # ── 1. Consolidate ────────────────────────────────────────────
 
@@ -146,18 +155,66 @@ class MemoryConsolidator:
     async def abstract(self, user_id: str) -> AbstractionReport:
         """Promote BELIEF/THOUGHT nodes to higher abstraction level.
 
-        This is a **placeholder** for Stage 2+. Full implementation requires
-        LLM-powered summarisation to create archetype beliefs.
-        Currently it counts candidates at abstraction_level == 1.
+        When an LLM client is available, clusters of BELIEF nodes at
+        ``abstraction_level == 1`` are summarised into a single archetype
+        BELIEF at ``abstraction_level == 2`` via LLM.
+
+        Without an LLM client the method counts candidates only (backward
+        compatible with the Sprint-0 placeholder behaviour).
         """
         nodes = await self.storage.find_nodes(user_id, node_type="BELIEF", limit=500)
         candidates = [
             n for n in nodes
             if n.metadata.get("abstraction_level", 0) == 1
         ]
-        # Real abstraction will call LLM to merge beliefs into archetypes.
-        # For now we just report how many are ready.
-        return AbstractionReport(candidates=len(candidates), abstracted=0)
+
+        if not candidates or self._llm_client is None:
+            return AbstractionReport(candidates=len(candidates), abstracted=0)
+
+        # Cluster candidates by embedding similarity (reuse consolidation clustering)
+        embedded = [n for n in candidates if n.embedding is not None]
+        clusters = _cluster_by_embedding(
+            embedded,
+            threshold=CONSOLIDATION_SIMILARITY_THRESHOLD,
+            min_size=CONSOLIDATION_MIN_CLUSTER_SIZE,
+        )
+
+        abstracted = 0
+        for cluster in clusters:
+            texts = [n.text or n.name or "" for n in cluster]
+            summary = await _llm_summarise(self._llm_client, texts)
+            if not summary:
+                continue
+
+            source_ids = [n.id for n in cluster]
+            archetype = Node(
+                id=str(uuid4()),
+                user_id=user_id,
+                type="BELIEF",
+                name=summary[:120],
+                text=summary,
+                key=f"archetype:{uuid4().hex[:8]}",
+                metadata=ensure_metadata_defaults({
+                    "abstraction_level": 2,
+                    "consolidation_source": source_ids,
+                    "salience_score": 1.0,
+                }),
+                created_at=datetime.now(UTC).isoformat(),
+                embedding=_mean_embedding(
+                    [n.embedding for n in cluster if n.embedding]
+                ),
+            )
+
+            await self.storage.merge_nodes(user_id, source_ids, archetype)
+            abstracted += 1
+            logger.info(
+                "Abstracted %d beliefs into archetype %s for user %s",
+                len(cluster),
+                archetype.id,
+                user_id,
+            )
+
+        return AbstractionReport(candidates=len(candidates), abstracted=abstracted)
 
     # ── 3. Forget ─────────────────────────────────────────────────
 
@@ -270,3 +327,52 @@ def _cluster_by_embedding(
         if len(cluster) >= min_size:
             clusters.append(cluster)
     return clusters
+
+
+_ABSTRACTION_PROMPT = (
+    "You are a psychologist assistant. "
+    "Summarise the following beliefs into ONE concise archetype belief "
+    "(1-2 sentences, in the same language as the input). "
+    "Return ONLY the summary text, nothing else.\n\n"
+)
+
+
+async def _llm_summarise(llm_client: object, texts: list[str]) -> str | None:
+    """Use an LLM to summarise a cluster of belief texts into one archetype.
+
+    Accepts any object that has an ``extract_all`` or ``generate_live_reply``
+    async method (i.e. the existing :class:`~core.llm_client.LLMClient` protocol).
+    Falls back gracefully on failure.
+    """
+    combined = "\n---\n".join(texts)
+    prompt = _ABSTRACTION_PROMPT + combined
+
+    # Try generate_live_reply first (produces free-form text)
+    gen_fn = getattr(llm_client, "generate_live_reply", None)
+    if gen_fn is not None:
+        try:
+            result = await gen_fn(
+                user_text=prompt,
+                intent="ABSTRACTION",
+                mood_context=None,
+                parts_context=None,
+                graph_context=None,
+            )
+            if result and result.strip():
+                return result.strip()
+        except Exception as exc:
+            logger.warning("LLM abstraction via generate_live_reply failed: %s", exc)
+
+    # Fallback: use extract_all and parse text from result
+    extract_fn = getattr(llm_client, "extract_all", None)
+    if extract_fn is not None:
+        try:
+            result = await extract_fn(prompt, "ABSTRACTION")
+            if isinstance(result, str) and result.strip():
+                return result.strip()
+            if isinstance(result, dict):
+                return str(result.get("summary", result.get("text", "")))[:500] or None
+        except Exception as exc:
+            logger.warning("LLM abstraction via extract_all failed: %s", exc)
+
+    return None
