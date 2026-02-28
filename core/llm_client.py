@@ -121,7 +121,6 @@ class OpenRouterQwenClient:
             completion = await client.chat.completions.create(
                 model=self.model_id,
                 temperature=0,
-                response_format={"type": "json_object"},
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT_EXTRACTOR},
                     {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},

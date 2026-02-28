@@ -147,8 +147,13 @@ class MessageProcessor:
             try:
                 logger.info("LLM extract_all call")
                 payload = await self.llm_client.extract_all(text, intent)
+                logger.info("LLM raw response: %s", repr(payload))
+                if self._is_minimal_payload(payload):
+                    logger.warning("LLM returned minimal/empty payload, using fallback")
+                    raise ValueError("minimal payload")
                 parsed = self._parse_json_payload(payload)
                 llm_nodes, llm_edges = self._map_payload_to_graph(user_id=user_id, person_id=person_id, data=parsed)
+                logger.info("LLM mapped: nodes=%d edges=%d", len(llm_nodes), len(llm_edges))
                 if llm_nodes or llm_edges:
                     llm_intent = str(parsed.get("intent", "")).upper()
                     return llm_nodes, llm_edges, llm_intent
@@ -159,6 +164,20 @@ class MessageProcessor:
         parts_nodes, parts_edges = await extractor_parts.extract(user_id, text, intent, person_id)
         emotion_nodes, emotion_edges = await extractor_emotion.extract(user_id, text, intent, person_id)
         return [*semantic_nodes, *parts_nodes, *emotion_nodes], [*semantic_edges, *parts_edges, *emotion_edges], None
+
+    def _is_minimal_payload(self, payload: dict | str) -> bool:
+        if not payload:
+            return True
+        if isinstance(payload, str):
+            compact = payload.strip()
+            return compact in {'{"intent": "REFLECTION"}', '{"intent":"REFLECTION"}'}
+        if isinstance(payload, dict):
+            intent = str(payload.get("intent", "")).upper()
+            nodes = payload.get("nodes")
+            edges = payload.get("edges")
+            if intent == "REFLECTION" and nodes in (None, []) and edges in (None, []):
+                return True
+        return False
 
     def _parse_json_payload(self, payload: dict | str) -> dict:
         if isinstance(payload, dict):

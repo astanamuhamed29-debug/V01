@@ -44,10 +44,6 @@ def main() -> None:
     asyncio.run(run_bot())
 
 
-if __name__ == "__main__":
-    main()
-
-
 async def handle_incoming_message(message: Message, processor) -> None:
     if message.from_user is None or message.text is None:
         return
@@ -61,3 +57,7 @@ async def handle_incoming_message(message: Message, processor) -> None:
 
     if result.reply_text:
         await message.answer(result.reply_text)
+
+
+if __name__ == "__main__":
+    main()
