@@ -188,6 +188,14 @@ class MessageProcessor:
         if fenced:
             cleaned = fenced.group(1).strip()
 
+        if "</think>" in cleaned:
+            cleaned = cleaned.split("</think>", 1)[1].strip()
+
+        first_brace = cleaned.find("{")
+        last_brace = cleaned.rfind("}")
+        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+            cleaned = cleaned[first_brace:last_brace + 1]
+
         return json.loads(cleaned)
 
     def _map_payload_to_graph(self, *, user_id: str, person_id: str, data: dict) -> tuple[list[Node], list[Edge]]:
