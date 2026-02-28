@@ -41,7 +41,7 @@ class LLMClient(Protocol):
 class MockLLMClient:
     async def classify_intent(self, text: str) -> str:
         lowered = text.lower()
-        if any(word in lowered for word in ["надо", "нужно", "сделать"]):
+        if any(word in lowered for word in ["надо", "нужно", "сделать", "сделай", "слеоай"]):
             return "TASK_LIKE"
         if any(word in lowered for word in ["чувств", "боюсь", "страшно"]):
             return "FEELING_REPORT"
