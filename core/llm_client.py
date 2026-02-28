@@ -205,7 +205,11 @@ class OpenRouterQwenClient:
                     line += f", голос: «{voice}»"
                 context_lines.append(line)
 
-        context_block = "\n".join(context_lines) if context_lines else "Первое обращение пользователя."
+        context_block = (
+            "Фоновые знания о пользователе (НЕ поднимай эти темы сам,\n"
+            "используй ТОЛЬКО если пользователь сам об этом заговорит):\n"
+            + "\n".join(context_lines)
+        ) if context_lines else "Первое обращение пользователя."
 
         # --- Session conversation history ---
         session_ctx = (graph_context or {}).get("session_context", [])

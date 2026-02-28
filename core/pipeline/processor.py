@@ -122,7 +122,7 @@ class MessageProcessor:
             self._calibrator_loaded.add(user_id)
 
         # Sprint-0: session tracking
-        session_id = self._resolve_session_id(user_id)
+        session_id = self._resolve_session_id(user_id, clear_session_memory=True)
 
         await self.journal.append(
             user_id=user_id, timestamp=ts, text=text, source=source,
@@ -291,13 +291,21 @@ class MessageProcessor:
 
         return ProcessResult(intent=intent, reply_text=final_reply, nodes=created_nodes, edges=created_edges)
 
-    def _resolve_session_id(self, user_id: str) -> str:
-        """Return current session id or create a new one after inactivity gap."""
+    def _resolve_session_id(self, user_id: str, *, clear_session_memory: bool = False) -> str:
+        """Return current session id or create a new one after inactivity gap.
+
+        When *clear_session_memory* is True and a new session is opened,
+        the :attr:`session_memory` context for *user_id* is wiped so that
+        stale conversation history does not bleed into the new session.
+        """
         now = datetime.now(timezone.utc)
         prev = self._sessions.get(user_id)
         if prev is None or (now - prev[1]) > self._session_gap:
             sid = str(uuid4())
             self._sessions[user_id] = (sid, now)
+            if clear_session_memory:
+                self.session_memory.clear(user_id)
+                logger.info("SessionMemory cleared for user=%s (new session %s)", user_id, sid[:8])
             return sid
         self._sessions[user_id] = (prev[0], now)
         return prev[0]
