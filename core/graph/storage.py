@@ -834,6 +834,60 @@ class GraphStorage:
         await conn.execute("UPDATE nodes SET is_deleted = 1 WHERE id = ?", (node_id,))
         await conn.commit()
 
+    async def merge_nodes(
+        self,
+        user_id: str,
+        source_node_ids: list[str],
+        target_node: Node,
+    ) -> Node:
+        """Merge several nodes into *target_node*.
+
+        * Upserts *target_node* into the graph.
+        * Re-points all edges that reference any *source_node_ids* to *target_node*.
+        * Soft-deletes the source nodes.
+
+        Returns the persisted *target_node*.
+        """
+        if not source_node_ids:
+            return await self.upsert_node(target_node)
+
+        await self._ensure_initialized()
+        conn = await self._get_conn()
+
+        saved = await self.upsert_node(target_node)
+
+        source_set = list(dict.fromkeys(source_node_ids))
+        placeholders = ",".join("?" * len(source_set))
+
+        # Re-point edges: source_node_id → target
+        await conn.execute(
+            f"UPDATE edges SET source_node_id = ? "
+            f"WHERE user_id = ? AND source_node_id IN ({placeholders})",
+            [saved.id, user_id, *source_set],
+        )
+        # Re-point edges: target_node_id → target
+        await conn.execute(
+            f"UPDATE edges SET target_node_id = ? "
+            f"WHERE user_id = ? AND target_node_id IN ({placeholders})",
+            [saved.id, user_id, *source_set],
+        )
+
+        # Remove self-loops that may have been created
+        await conn.execute(
+            "DELETE FROM edges WHERE source_node_id = ? AND target_node_id = ?",
+            (saved.id, saved.id),
+        )
+
+        # Soft-delete source nodes
+        await conn.execute(
+            f"UPDATE nodes SET is_deleted = 1 "
+            f"WHERE user_id = ? AND id IN ({placeholders})",
+            [user_id, *source_set],
+        )
+
+        await conn.commit()
+        return saved
+
     async def get_nodes_by_retention(
         self,
         user_id: str,
