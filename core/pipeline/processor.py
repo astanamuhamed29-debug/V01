@@ -6,6 +6,7 @@ import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING
 
 from agents.reply_minimal import generate_reply
 from config import USE_LLM
@@ -26,6 +27,9 @@ from core.mood.tracker import MoodTracker
 from core.parts.memory import PartsMemory
 from core.pipeline import extractor_emotion, extractor_parts, extractor_semantic, router
 from core.pipeline.events import EventBus
+
+if TYPE_CHECKING:
+    from core.analytics.calibrator import ThresholdCalibrator
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +62,7 @@ class MessageProcessor:
         journal: JournalStorage,
         llm_client: LLMClient | None = None,
         embedding_service: EmbeddingService | None = None,
+        calibrator: "ThresholdCalibrator | None" = None,
         use_llm: bool | None = None,
         event_bus: EventBus | None = None,
     ) -> None:
@@ -67,6 +72,7 @@ class MessageProcessor:
         self.use_llm = USE_LLM if use_llm is None else use_llm
         self.event_bus = event_bus or EventBus()
         self.embedding_service = embedding_service
+        self.calibrator = calibrator
         self.mood_tracker = MoodTracker(graph_api.storage)
         self.parts_memory = PartsMemory(graph_api.storage)
         self.context_builder = GraphContextBuilder(graph_api.storage, embedding_service=self.embedding_service)

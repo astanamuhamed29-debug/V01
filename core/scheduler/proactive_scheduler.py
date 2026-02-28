@@ -210,7 +210,7 @@ class SignalDetector:
         return ProactiveSignal(
             user_id=report.user_id,
             signal_type="silence_break",
-            score=0.35,
+            score=0.42,
             message="Давно не виделись. Как ты сейчас?",
             context={"last_activity_at": report.last_activity_at},
         )

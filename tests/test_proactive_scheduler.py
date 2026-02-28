@@ -5,7 +5,7 @@ from typing import Any, cast
 from core.analytics.pattern_analyzer import NeedProfile, PatternReport
 from core.graph.model import Node
 from core.graph.storage import GraphStorage
-from core.scheduler.proactive_scheduler import ProactiveScheduler
+from core.scheduler.proactive_scheduler import ProactiveScheduler, SIGNAL_THRESHOLD, SignalDetector
 
 
 class FakeBot:
@@ -187,3 +187,15 @@ def test_scheduler_storage_methods(tmp_path):
             await storage.close()
 
     asyncio.run(scenario())
+
+
+def test_silence_break_score_above_threshold():
+    old_time = (datetime.now(timezone.utc) - timedelta(days=4)).isoformat()
+    report = _make_report("u1", has_enough_data=True, need_signals=0)
+    report.last_activity_at = old_time
+
+    detector = SignalDetector()
+    signal = detector._detect_silence_break(report)
+
+    assert signal is not None
+    assert signal.score >= SIGNAL_THRESHOLD
