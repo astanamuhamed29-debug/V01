@@ -49,14 +49,20 @@ class PartsMemory:
             "first_seen": first_seen,
         }
 
-    async def register_appearance(self, user_id: str, part_node: Node) -> Node:
+    async def register_appearance(self, user_id: str, part_node: Node) -> dict:
         """
         Вызывается при каждом появлении части.
         Обновляет счётчик appearances и last_seen в metadata.
         Дедупликация по key уже работает в apply_changes.
+        Возвращает history dict сразу.
         """
         if not part_node.key:
-            return part_node
+            return {
+                "part": part_node,
+                "appearances": int(part_node.metadata.get("appearances", 1)),
+                "last_seen": part_node.metadata.get("last_seen") or part_node.created_at,
+                "first_seen": part_node.metadata.get("first_seen") or part_node.created_at,
+            }
 
         existing = await self.storage.find_by_key(user_id, "PART", part_node.key)
         now = datetime.now(timezone.utc).isoformat()
@@ -81,7 +87,13 @@ class PartsMemory:
                 metadata=updated_metadata,
                 created_at=existing.created_at,
             )
-            return await self.storage.upsert_node(updated)
+            saved = await self.storage.upsert_node(updated)
+            return {
+                "part": saved,
+                "appearances": int(saved.metadata.get("appearances", 1)),
+                "last_seen": saved.metadata.get("last_seen"),
+                "first_seen": saved.metadata.get("first_seen"),
+            }
 
         part_metadata = {
             **part_node.metadata,
@@ -100,4 +112,10 @@ class PartsMemory:
             metadata=part_metadata,
             created_at=part_node.created_at,
         )
-        return await self.storage.upsert_node(first)
+        saved = await self.storage.upsert_node(first)
+        return {
+            "part": saved,
+            "appearances": int(saved.metadata.get("appearances", 1)),
+            "last_seen": saved.metadata.get("last_seen"),
+            "first_seen": saved.metadata.get("first_seen"),
+        }

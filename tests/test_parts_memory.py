@@ -23,8 +23,9 @@ def test_first_appearance(tmp_path):
         saved = await memory.register_appearance("me", part)
         history = await memory.get_part_history("me", "part:critic")
 
-        assert saved.metadata.get("appearances") == 1
-        assert saved.metadata.get("first_seen")
+        assert saved["appearances"] == 1
+        assert saved["first_seen"]
+        assert saved["part"] is not None
         assert history["appearances"] == 1
 
     asyncio.run(scenario())
@@ -57,9 +58,9 @@ def test_repeated_appearance(tmp_path):
         )
         saved_second = await memory.register_appearance("me", second)
 
-        assert saved_second.metadata.get("appearances") == 2
-        assert saved_second.metadata.get("first_seen") == saved_first.metadata.get("first_seen")
-        assert saved_second.metadata.get("last_seen") != saved_first.metadata.get("last_seen")
+        assert saved_second["appearances"] == 2
+        assert saved_second["first_seen"] == saved_first["first_seen"]
+        assert saved_second["last_seen"] != saved_first["last_seen"]
 
     asyncio.run(scenario())
 

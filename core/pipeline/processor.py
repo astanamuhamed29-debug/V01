@@ -100,23 +100,34 @@ class MessageProcessor:
 
         created_nodes, created_edges = await self.graph_api.apply_changes(user_id, nodes, edges)
 
-        projects = await self.graph_api.get_user_nodes_by_type(user_id, "PROJECT")
         tasks = [node for node in created_nodes if node.type == "TASK"]
-        if tasks and projects:
+        current_projects = [node for node in created_nodes if node.type == "PROJECT"]
+        if tasks and current_projects:
             for task in tasks:
                 await self.graph_api.create_edge(
                     user_id=user_id,
-                    source_node_id=projects[0].id,
+                    source_node_id=current_projects[0].id,
                     target_node_id=task.id,
                     relation="HAS_TASK",
                 )
+        elif tasks and not current_projects:
+            all_projects = await self.graph_api.get_user_nodes_by_type(user_id, "PROJECT")
+            all_projects_sorted = sorted(all_projects, key=lambda node: node.created_at or "", reverse=True)
+            if all_projects_sorted:
+                for task in tasks:
+                    await self.graph_api.create_edge(
+                        user_id=user_id,
+                        source_node_id=all_projects_sorted[0].id,
+                        target_node_id=task.id,
+                        relation="HAS_TASK",
+                    )
 
         part_nodes = [node for node in created_nodes if node.type == "PART"]
         parts_context: list[dict] = []
         for part in part_nodes:
-            await self.parts_memory.register_appearance(user_id, part)
-            if part.key:
-                parts_context.append(await self.parts_memory.get_part_history(user_id, part.key))
+            history = await self.parts_memory.register_appearance(user_id, part)
+            if history.get("part"):
+                parts_context.append(history)
 
         emotion_nodes = [node for node in created_nodes if node.type == "EMOTION"]
         mood_context = await self.mood_tracker.update(user_id, emotion_nodes)
@@ -194,10 +205,10 @@ class MessageProcessor:
                     "known_parts": [
                         p["key"] for p in graph_context.get("known_parts", [])[:3] if p.get("key")
                     ],
-                    "known_values": [],
+                    "known_values": [
+                        v["key"] for v in graph_context.get("known_values", []) if v.get("key")
+                    ][:3],
                 }
-                value_nodes = await self.graph_api.get_user_nodes_by_type(user_id, "VALUE")
-                graph_hints["known_values"] = [n.key for n in value_nodes if n.key][:3]
 
                 logger.info("LLM extract_all call")
                 payload = await self.llm_client.extract_all(text, "UNKNOWN", graph_hints=graph_hints)
