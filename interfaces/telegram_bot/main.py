@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import Any
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.types import Message
@@ -27,16 +26,13 @@ async def handle_text_message(message: Message, processor: MessageProcessor) -> 
     await handle_incoming_message(message, processor)
 
 
-async def on_startup(dispatcher: Dispatcher, **kwargs: Any) -> None:
-    dispatcher["processor"] = build_processor()
-
-
 async def run_bot() -> None:
     token = _get_bot_token()
     bot = Bot(token=token)
+    processor = build_processor()
     dispatcher = Dispatcher()
+    dispatcher["processor"] = processor
     dispatcher.include_router(router)
-    dispatcher.startup.register(on_startup)
 
     try:
         await dispatcher.start_polling(bot)
