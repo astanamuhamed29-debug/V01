@@ -56,7 +56,7 @@ class OpenRouterQwenClient:
     def __init__(self, *, api_key: str | None = None, model_id: str | None = None) -> None:
         load_dotenv()
         self.api_key = api_key or os.getenv("OPENROUTER_API_KEY", "")
-        self.model_id = model_id or LLM_MODEL_ID
+        self.model_id = model_id or os.getenv("OPENROUTER_MODEL_ID", LLM_MODEL_ID)
         self.base_url = "https://openrouter.ai/api/v1"
 
         self._client: Any | None = None
@@ -129,6 +129,7 @@ class OpenRouterQwenClient:
             completion = await client.chat.completions.create(
                 model=self.model_id,
                 temperature=0,
+                max_tokens=2000,
                 messages=[
                     {
                         "role": "system",
