@@ -3,8 +3,18 @@ from __future__ import annotations
 from core.graph.model import Node
 
 
-def generate_reply(text: str, intent: str, extracted_structures: dict) -> str:
+def generate_reply(text: str, intent: str, extracted_structures: dict, mood_context: dict | None = None) -> str:
     nodes: list[Node] = extracted_structures.get("nodes", [])
+
+    trend_note = ""
+    if mood_context:
+        v = mood_context.get("valence_avg", 0)
+        label = mood_context.get("dominant_label", "")
+        count = mood_context.get("sample_count", 1)
+        if v < -0.5 and count >= 3:
+            trend_note = f" Замечаю, что {label or 'негативное состояние'} повторяется — это уже {count}-й раз подряд."
+        elif v < -0.3:
+            trend_note = " Фиксирую нарастающее напряжение."
 
     emotions = [node for node in nodes if node.type == "EMOTION"]
     tasks = [node for node in nodes if node.type == "TASK"]
@@ -18,7 +28,7 @@ def generate_reply(text: str, intent: str, extracted_structures: dict) -> str:
         ]
         if emotion_labels:
             joined = " и ".join(emotion_labels)
-            return f"Слышу: {joined}. Сохранил это в граф — можем разобрать, если захочешь."
+            return f"Слышу: {joined}. Сохранил в граф.{trend_note}"
         return "Слышу тебя. Эмоциональный сигнал записан."
 
     if intent == "TASK_LIKE" or tasks:

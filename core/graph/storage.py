@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 import aiosqlite
@@ -67,6 +68,21 @@ class GraphStorage:
 
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_edges_unique
                     ON edges(user_id, source_node_id, target_node_id, relation);
+
+                CREATE TABLE IF NOT EXISTS mood_snapshots (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    valence_avg REAL NOT NULL,
+                    arousal_avg REAL NOT NULL,
+                    dominance_avg REAL NOT NULL DEFAULT 0.0,
+                    intensity_avg REAL NOT NULL DEFAULT 0.5,
+                    dominant_label TEXT,
+                    sample_count INTEGER NOT NULL DEFAULT 1
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_mood_snapshots_user_ts
+                    ON mood_snapshots (user_id, timestamp DESC);
                 """
             )
                 await conn.commit()
@@ -74,6 +90,10 @@ class GraphStorage:
 
     async def upsert_node(self, node: Node) -> Node:
         await self._ensure_initialized()
+
+        node_metadata = dict(node.metadata)
+        if node.type == "EMOTION" and "created_at" not in node_metadata:
+            node_metadata["created_at"] = datetime.now(timezone.utc).isoformat()
 
         async with self._connect() as conn:
             if node.key:
@@ -101,7 +121,7 @@ class GraphStorage:
                         node.text,
                         node.subtype,
                         node.key,
-                        json.dumps(node.metadata, ensure_ascii=False),
+                        json.dumps(node_metadata, ensure_ascii=False),
                         created_at,
                     ),
                 )
@@ -125,12 +145,70 @@ class GraphStorage:
                     node.text,
                     node.subtype,
                     None,
-                    json.dumps(node.metadata, ensure_ascii=False),
+                    json.dumps(node_metadata, ensure_ascii=False),
                     created_at,
                 ),
             )
             await conn.commit()
             return await self.get_node(node.id)
+
+    async def save_mood_snapshot(self, snapshot: dict) -> None:
+        await self._ensure_initialized()
+
+        async with self._connect() as conn:
+            await conn.execute(
+                """
+                INSERT OR REPLACE INTO mood_snapshots (
+                    id, user_id, timestamp, valence_avg, arousal_avg,
+                    dominance_avg, intensity_avg, dominant_label, sample_count
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    snapshot["id"],
+                    snapshot["user_id"],
+                    snapshot["timestamp"],
+                    snapshot["valence_avg"],
+                    snapshot["arousal_avg"],
+                    snapshot.get("dominance_avg", 0.0),
+                    snapshot.get("intensity_avg", 0.5),
+                    snapshot.get("dominant_label"),
+                    snapshot.get("sample_count", 1),
+                ),
+            )
+            await conn.commit()
+
+    async def get_latest_mood_snapshot(self, user_id: str) -> dict | None:
+        await self._ensure_initialized()
+
+        async with self._connect() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT * FROM mood_snapshots
+                WHERE user_id = ?
+                ORDER BY timestamp DESC
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+            row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def get_mood_snapshots(self, user_id: str, limit: int = 5) -> list[dict]:
+        await self._ensure_initialized()
+
+        async with self._connect() as conn:
+            cursor = await conn.execute(
+                """
+                SELECT * FROM mood_snapshots
+                WHERE user_id = ?
+                ORDER BY timestamp DESC
+                LIMIT ?
+                """,
+                (user_id, limit),
+            )
+            rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
 
     async def add_edge(self, edge: Edge) -> Edge:
         await self._ensure_initialized()
