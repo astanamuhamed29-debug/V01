@@ -10,6 +10,7 @@ import networkx as nx  # type: ignore[import-not-found]
 from networkx.algorithms import community  # type: ignore[import-not-found]
 
 from core.graph.model import Edge, Node, edge_weight
+from core.graph.model import get_node_embedding
 from core.graph.storage import GraphStorage, _cosine_similarity
 from core.llm.embedding_service import EmbeddingService
 
@@ -181,7 +182,7 @@ class PatternAnalyzer:
                 type=node.type,
                 name=name,
                 created_at=node.created_at,
-                embedding=node.embedding or [],
+                embedding=get_node_embedding(node) or [],
             )
         for edge in edges:
             if graph.has_node(edge.source_node_id) and graph.has_node(edge.target_node_id):

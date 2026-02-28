@@ -106,9 +106,9 @@ def test_cluster_by_embedding_groups_similar():
     emb_c = [0.0, 0.0, 1.0]   # orthogonal → not clustered
 
     nodes = [
-        Node(user_id="u", type="NOTE", text="a", embedding=emb_a),
-        Node(user_id="u", type="NOTE", text="b", embedding=emb_b),
-        Node(user_id="u", type="NOTE", text="c", embedding=emb_c),
+        Node(user_id="u", type="NOTE", text="a", metadata={"embedding": emb_a}),
+        Node(user_id="u", type="NOTE", text="b", metadata={"embedding": emb_b}),
+        Node(user_id="u", type="NOTE", text="c", metadata={"embedding": emb_c}),
     ]
     clusters = _cluster_by_embedding(nodes, threshold=0.9, min_size=2)
     assert len(clusters) == 1
@@ -117,8 +117,8 @@ def test_cluster_by_embedding_groups_similar():
 
 def test_cluster_by_embedding_no_clusters_below_min_size():
     nodes = [
-        Node(user_id="u", type="NOTE", text="a", embedding=[1.0, 0.0]),
-        Node(user_id="u", type="NOTE", text="b", embedding=[0.0, 1.0]),
+        Node(user_id="u", type="NOTE", text="a", metadata={"embedding": [1.0, 0.0]}),
+        Node(user_id="u", type="NOTE", text="b", metadata={"embedding": [0.0, 1.0]}),
     ]
     clusters = _cluster_by_embedding(nodes, threshold=0.9, min_size=2)
     assert len(clusters) == 0
@@ -146,11 +146,11 @@ def test_consolidate_merges_similar_notes(tmp_path):
             emb2 = [0.99, 0.1, 0.0]
             await storage.upsert_node(
                 Node(user_id="u1", type="NOTE", text="fear of deadline",
-                     key="note:d1", metadata={"salience_score": 0.1}, embedding=emb)
+                     key="note:d1", metadata={"salience_score": 0.1, "embedding": emb})
             )
             await storage.upsert_node(
                 Node(user_id="u1", type="NOTE", text="deadline anxiety",
-                     key="note:d2", metadata={"salience_score": 0.1}, embedding=emb2)
+                     key="note:d2", metadata={"salience_score": 0.1, "embedding": emb2})
             )
 
             mc = MemoryConsolidator(storage)
@@ -182,7 +182,7 @@ def test_consolidate_skips_when_too_few(tmp_path):
         try:
             await storage.upsert_node(
                 Node(user_id="u1", type="NOTE", text="only one",
-                     key="note:o1", metadata={"salience_score": 0.1}, embedding=[1.0, 0.0])
+                     key="note:o1", metadata={"salience_score": 0.1, "embedding": [1.0, 0.0]})
             )
             mc = MemoryConsolidator(storage)
             report = await mc.consolidate("u1")
@@ -291,7 +291,7 @@ def test_reconsolidation_detects_contradiction(tmp_path):
             # Existing belief with embedding
             await storage.upsert_node(
                 Node(user_id="u1", type="BELIEF", text="I fear deadlines",
-                     key="b:fear", embedding=[0.8, 0.5, 0.2])
+                     key="b:fear", metadata={"embedding": [0.8, 0.5, 0.2]})
             )
             # New text with a slightly different embedding in [0.5, 0.75] band
             engine = ReconsolidationEngine(storage)
@@ -313,7 +313,7 @@ def test_reconsolidation_no_contradiction_for_identical(tmp_path):
             emb = [1.0, 0.0, 0.0]
             await storage.upsert_node(
                 Node(user_id="u1", type="BELIEF", text="I fear deadlines",
-                     key="b:fear", embedding=emb)
+                     key="b:fear", metadata={"embedding": emb})
             )
             engine = ReconsolidationEngine(storage)
             # Identical embedding → sim ~1.0 → not in [0.5, 0.75] band
@@ -331,7 +331,7 @@ def test_reconsolidation_no_contradiction_without_embedding(tmp_path):
         try:
             await storage.upsert_node(
                 Node(user_id="u1", type="BELIEF", text="belief",
-                     key="b:x", embedding=[1.0, 0.0])
+                     key="b:x", metadata={"embedding": [1.0, 0.0]})
             )
             engine = ReconsolidationEngine(storage)
             # No new_embedding → no contradictions possible
@@ -349,7 +349,7 @@ def test_update_belief_revises_node(tmp_path):
         try:
             belief = await storage.upsert_node(
                 Node(user_id="u1", type="BELIEF", text="I fear deadlines",
-                     key="b:fear", embedding=[0.8, 0.5, 0.2])
+                     key="b:fear", metadata={"embedding": [0.8, 0.5, 0.2]})
             )
             engine = ReconsolidationEngine(storage)
             evidence = ContraEvidence(

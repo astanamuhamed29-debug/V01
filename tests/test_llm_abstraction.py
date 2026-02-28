@@ -38,8 +38,7 @@ def test_abstract_with_llm_creates_archetype(tmp_path):
                     user_id="u1", type="BELIEF",
                     text="fear of deadline pressure",
                     key="b:d1",
-                    metadata={"abstraction_level": 1, "salience_score": 0.5},
-                    embedding=emb,
+                    metadata={"abstraction_level": 1, "salience_score": 0.5, "embedding": emb},
                 )
             )
             await storage.upsert_node(
@@ -47,8 +46,7 @@ def test_abstract_with_llm_creates_archetype(tmp_path):
                     user_id="u1", type="BELIEF",
                     text="anxiety about time constraints",
                     key="b:d2",
-                    metadata={"abstraction_level": 1, "salience_score": 0.5},
-                    embedding=emb2,
+                    metadata={"abstraction_level": 1, "salience_score": 0.5, "embedding": emb2},
                 )
             )
 
@@ -80,8 +78,8 @@ def test_abstract_without_llm_is_placeholder(tmp_path):
             await storage.upsert_node(
                 Node(
                     user_id="u1", type="BELIEF", text="belief",
-                    key="b:1", metadata={"abstraction_level": 1},
-                    embedding=[1.0, 0.0, 0.0],
+                    metadata={"abstraction_level": 1, "embedding": [1.0, 0.0, 0.0]},
+                    key="b:1",
                 )
             )
             # No LLM → should just count candidates
@@ -125,15 +123,15 @@ def test_abstract_graceful_on_llm_failure(tmp_path):
             await storage.upsert_node(
                 Node(
                     user_id="u1", type="BELIEF", text="a",
-                    key="b:a", metadata={"abstraction_level": 1},
-                    embedding=emb,
+                    metadata={"abstraction_level": 1, "embedding": emb},
+                    key="b:a",
                 )
             )
             await storage.upsert_node(
                 Node(
                     user_id="u1", type="BELIEF", text="b",
-                    key="b:b", metadata={"abstraction_level": 1},
-                    embedding=emb2,
+                    metadata={"abstraction_level": 1, "embedding": emb2},
+                    key="b:b",
                 )
             )
             mc = MemoryConsolidator(storage, llm_client=FailingLLM())

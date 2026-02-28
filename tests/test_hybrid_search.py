@@ -17,7 +17,7 @@ def _node(node_id: str, text: str, embedding: list[float] | None = None) -> Node
         user_id="u1",
         type="NOTE",
         text=text,
-        embedding=embedding,
+        metadata={"embedding": embedding} if embedding is not None else {},
     )
 
 

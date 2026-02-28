@@ -60,8 +60,19 @@ class Node:
     key: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=utc_now_iso)
-    embedding: list[float] | None = field(default=None, compare=False)
-    # NOTE: slots compatibility: optional embedding uses default=None and compare=False.
+
+
+def get_node_embedding(node: Node) -> list[float] | None:
+    """Return node embedding from metadata for backward-compatible readers.
+
+    Embeddings are no longer persisted in dedicated SQLite columns; Qdrant is the
+    primary vector store. Some analytical modules may still provide temporary
+    in-memory vectors via ``node.metadata['embedding']``.
+    """
+    raw = node.metadata.get("embedding")
+    if isinstance(raw, list) and raw and all(isinstance(v, (int, float)) for v in raw):
+        return [float(v) for v in raw]
+    return None
 
 
 @dataclass(slots=True)

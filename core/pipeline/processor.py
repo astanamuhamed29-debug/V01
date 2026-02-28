@@ -12,6 +12,7 @@ from uuid import uuid4
 from agents.reply_minimal import generate_reply
 from config import MAX_TEXT_LENGTH, USE_LLM
 from core.context.builder import GraphContextBuilder
+from core.context.session_memory import SessionMemory
 from core.graph.api import GraphAPI
 from core.graph.model import Edge, Node
 from core.journal.storage import JournalStorage
@@ -28,6 +29,7 @@ from core.mood.tracker import MoodTracker
 from core.parts.memory import PartsMemory
 from core.pipeline import extractor_emotion, extractor_parts, extractor_semantic, router
 from core.pipeline.events import EventBus
+from core.search.qdrant_storage import QdrantVectorStorage, VectorSearchResult
 
 if TYPE_CHECKING:
     from core.analytics.calibrator import ThresholdCalibrator
@@ -71,6 +73,8 @@ class MessageProcessor:
         self,
         graph_api: GraphAPI,
         journal: JournalStorage,
+        qdrant: QdrantVectorStorage,
+        session_memory: SessionMemory,
         llm_client: LLMClient | None = None,
         embedding_service: EmbeddingService | None = None,
         calibrator: "ThresholdCalibrator | None" = None,
@@ -83,6 +87,8 @@ class MessageProcessor:
         self.use_llm = USE_LLM if use_llm is None else use_llm
         self.event_bus = event_bus or EventBus()
         self.embedding_service = embedding_service
+        self.qdrant = qdrant
+        self.session_memory = session_memory
         self.calibrator = calibrator
         self.mood_tracker = MoodTracker(graph_api.storage)
         self.parts_memory = PartsMemory(graph_api.storage)
@@ -129,24 +135,13 @@ class MessageProcessor:
         person = await self.graph_api.ensure_person_node(user_id)
         graph_context = await self.context_builder.build(user_id)
 
-        extract_task = asyncio.create_task(
-            self._extract_via_llm_all(
-                user_id=user_id,
-                text=text,
-                intent=intent,
-                person_id=person.id,
-                graph_context=graph_context,
-            )
+        nodes, edges, llm_intent = await self._extract_via_llm_all(
+            user_id=user_id,
+            text=text,
+            intent=intent,
+            person_id=person.id,
+            graph_context=graph_context,
         )
-        live_reply_task = asyncio.create_task(
-            self._generate_live_reply_safe(
-                text=text,
-                intent=intent,
-                graph_context=graph_context,
-            )
-        )
-
-        (nodes, edges, llm_intent), live_reply_preliminary = await asyncio.gather(extract_task, live_reply_task)
         if llm_intent and llm_intent in router.INTENTS:
             if intent in {"UNKNOWN", "REFLECTION"}:
                 intent = llm_intent
@@ -160,6 +155,47 @@ class MessageProcessor:
         created_nodes, created_edges = await self.graph_api.apply_changes(user_id, nodes, edges)
         if self.embedding_service:
             asyncio.create_task(self._embed_and_save_nodes(created_nodes))
+
+        retrieved_context: list[VectorSearchResult] = []
+        try:
+            embed_candidates = [
+                n for n in created_nodes if n.type in ("BELIEF", "NEED", "VALUE", "THOUGHT", "EMOTION")
+            ]
+            if embed_candidates and self.embedding_service:
+                seed_text = embed_candidates[0].text or embed_candidates[0].name or ""
+                if seed_text.strip():
+                    first_embedding = await self.embedding_service.embed_text(seed_text)
+                    try:
+                        retrieved_context = self.qdrant.search_similar(
+                            query_embedding=first_embedding,
+                            user_id=user_id,
+                            top_k=3,
+                            node_types=["BELIEF", "NEED", "VALUE", "THOUGHT"],
+                        )
+                    except Exception as exc:
+                        logger.warning("Qdrant ORIENT failed: %s", exc)
+        except Exception as exc:
+            logger.warning("ORIENT embedding failed: %s", exc)
+
+        session_ctx = self.session_memory.get_context(user_id)
+
+        has_part = any(n.type == "PART" for n in created_nodes)
+        has_value = any(n.type == "VALUE" for n in created_nodes)
+        low_valence = any(
+            float(n.metadata.get("pad_v", n.metadata.get("valence", 0))) < -0.5
+            for n in created_nodes
+            if n.type == "EMOTION"
+        )
+        top_score = retrieved_context[0].score if retrieved_context else 0.0
+
+        if has_part and has_value:
+            policy = "IFS_RESOLVE"
+        elif low_valence:
+            policy = "VALIDATE"
+        elif top_score > 0.85:
+            policy = "PATTERN_INSIGHT"
+        else:
+            policy = "REFLECT"
 
         tasks = [node for node in created_nodes if node.type == "TASK"]
         current_projects = [node for node in created_nodes if node.type == "PROJECT"]
@@ -223,18 +259,25 @@ class MessageProcessor:
             mood_context=mood_context,
             parts_context=parts_context,
             graph_context=graph_context,
+            retrieved_context=retrieved_context,
+            session_context=session_ctx,
+            policy=policy,
         )
 
-        final_reply = live_reply_preliminary
-        if not final_reply.strip():
-            live_reply = await self._generate_live_reply_safe(
-                text=text,
-                intent=intent,
-                graph_context=graph_context,
-                mood_context=mood_context,
-                parts_context=parts_context,
-            )
-            final_reply = live_reply if live_reply and live_reply.strip() else reply_text
+        live_reply = await self._generate_live_reply_safe(
+            text=text,
+            intent=intent,
+            graph_context=graph_context,
+            mood_context=mood_context,
+            parts_context=parts_context,
+            retrieved_context=retrieved_context,
+            session_context=session_ctx,
+            policy=policy,
+        )
+        final_reply = live_reply if live_reply and live_reply.strip() else reply_text
+
+        self.session_memory.add_message(user_id, text, role="user")
+        self.session_memory.add_message(user_id, final_reply, role="assistant")
 
         self.event_bus.publish(
             "pipeline.processed",
@@ -264,8 +307,23 @@ class MessageProcessor:
             return
         try:
             embeddings = await self.embedding_service.embed_nodes(nodes)
-            for node_id, embedding in embeddings.items():
-                await self.graph_api.storage.save_node_embedding(node_id, embedding)
+            node_map = {node.id: node for node in nodes}
+            points = [
+                {
+                    "node_id": node_id,
+                    "embedding": embedding,
+                    "user_id": node.user_id,
+                    "node_type": node.type,
+                    "created_at": node.created_at or "",
+                }
+                for node_id, embedding in embeddings.items()
+                if (node := node_map.get(node_id))
+            ]
+            if points:
+                try:
+                    self.qdrant.upsert_embeddings_batch(points)
+                except Exception as exc:
+                    logger.warning("Qdrant upsert batch failed: %s", exc)
         except Exception as exc:
             logger.warning("Background embedding failed: %s", exc)
 
@@ -423,16 +481,23 @@ class MessageProcessor:
         graph_context: dict,
         mood_context: dict | None = None,
         parts_context: list[dict] | None = None,
+        retrieved_context: list[VectorSearchResult] | None = None,
+        session_context: list[dict] | None = None,
+        policy: str = "REFLECT",
     ) -> str:
         if not self.live_reply_enabled:
             return ""
         try:
+            runtime_context = dict(graph_context)
+            runtime_context["retrieved_context"] = [r.payload for r in (retrieved_context or [])[:3]]
+            runtime_context["session_context"] = (session_context or [])[-5:]
+            runtime_context["policy"] = policy
             return await self.llm_client.generate_live_reply(
                 user_text=text,
                 intent=intent,
                 mood_context=mood_context,
                 parts_context=parts_context,
-                graph_context=graph_context,
+                graph_context=runtime_context,
             )
         except Exception as exc:
             logger.warning("live_reply_safe failed: %s", exc)

@@ -32,7 +32,6 @@ class GraphRAGRetriever:
         self,
         user_id: str,
         query: str,
-        query_embedding: list[float] | None = None,
         top_k: int = 5,
         alpha: float = 0.7,
     ) -> list[tuple["Node", float]]:
@@ -45,7 +44,6 @@ class GraphRAGRetriever:
         return await self.storage.hybrid_search(
             user_id=user_id,
             query_text=query,
-            query_embedding=query_embedding,
             alpha=alpha,
             top_k=top_k,
         )
@@ -54,7 +52,6 @@ class GraphRAGRetriever:
         self,
         user_id: str,
         query: str,
-        query_embedding: list[float] | None = None,
         top_k: int = 5,
     ) -> str:
         """Build a structured textual context string for LLM prompting.
@@ -63,7 +60,7 @@ class GraphRAGRetriever:
         neighbours so that the LLM has relational information, not just
         isolated facts.
         """
-        results = await self.retrieve(user_id, query, query_embedding, top_k=top_k)
+        results = await self.retrieve(user_id, query, top_k=top_k)
         if not results:
             return ""
 

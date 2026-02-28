@@ -1,9 +1,18 @@
 import asyncio
 
+from core.context.session_memory import SessionMemory
 from core.graph.api import GraphAPI
 from core.graph.storage import GraphStorage
 from core.journal.storage import JournalStorage
 from core.pipeline.processor import MessageProcessor
+
+
+class _NoopQdrant:
+    def upsert_embeddings_batch(self, points):
+        return
+
+    def search_similar(self, *args, **kwargs):
+        return []
 
 
 class FencedLLMClient:
@@ -85,7 +94,14 @@ def test_processor_parses_fenced_llm_json_into_graph(tmp_path):
         api = GraphAPI(GraphStorage(db_path=db_path))
         journal = JournalStorage(db_path=db_path)
         llm_client = FencedLLMClient()
-        processor = MessageProcessor(graph_api=api, journal=journal, llm_client=llm_client, use_llm=True)
+        processor = MessageProcessor(
+            graph_api=api,
+            journal=journal,
+            qdrant=_NoopQdrant(),
+            session_memory=SessionMemory(),
+            llm_client=llm_client,
+            use_llm=True,
+        )
 
         try:
             await processor.process_message(user_id="me", text="тест", source="cli")
@@ -106,7 +122,14 @@ def test_processor_does_not_crash_on_bad_llm_json(tmp_path):
         db_path = tmp_path / "llm_bad.db"
         api = GraphAPI(GraphStorage(db_path=db_path))
         journal = JournalStorage(db_path=db_path)
-        processor = MessageProcessor(graph_api=api, journal=journal, llm_client=BrokenLLMClient(), use_llm=True)
+        processor = MessageProcessor(
+            graph_api=api,
+            journal=journal,
+            qdrant=_NoopQdrant(),
+            session_memory=SessionMemory(),
+            llm_client=BrokenLLMClient(),
+            use_llm=True,
+        )
 
         try:
             result = await processor.process_message(

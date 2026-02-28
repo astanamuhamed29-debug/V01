@@ -19,7 +19,7 @@ import math
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from core.graph.model import Node
+from core.graph.model import Node, get_node_embedding
 from core.graph.storage import GraphStorage
 
 logger = logging.getLogger(__name__)
@@ -69,9 +69,10 @@ class ReconsolidationEngine:
         beliefs = await self.storage.find_nodes(user_id, node_type="BELIEF", limit=200)
         results: list[ContraEvidence] = []
         for belief in beliefs:
-            if belief.embedding is None:
+            belief_embedding = get_node_embedding(belief)
+            if belief_embedding is None:
                 continue
-            sim = _cosine_similarity(new_embedding, belief.embedding)
+            sim = _cosine_similarity(new_embedding, belief_embedding)
             if CONTRA_SIM_LOW <= sim <= CONTRA_SIM_HIGH:
                 results.append(
                     ContraEvidence(
@@ -124,7 +125,6 @@ class ReconsolidationEngine:
             key=node.key,
             metadata=meta,
             created_at=node.created_at,
-            embedding=node.embedding,
         )
         saved = await self.storage.upsert_node(revised)
         logger.info(

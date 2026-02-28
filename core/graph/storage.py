@@ -126,7 +126,6 @@ class GraphStorage:
             )
             # ── Sprint-0 migrations (backward-compatible ALTER TABLE) ──
             _migrations = [
-                "ALTER TABLE nodes ADD COLUMN embedding_json TEXT",
                 "ALTER TABLE nodes ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0",
                 # mood_snapshots — fields for future predictive engine
                 "ALTER TABLE mood_snapshots ADD COLUMN stressor_tags TEXT DEFAULT '[]'",
@@ -184,16 +183,11 @@ class GraphStorage:
             existing = await cursor.fetchone()
             canonical_id = existing["id"] if existing else node.id
             created_at = existing["created_at"] if existing else node.created_at
-            embedding_json = (
-                json.dumps(node.embedding)
-                if node.embedding is not None
-                else (existing["embedding_json"] if existing else None)
-            )
 
             await conn.execute(
                 """
-                INSERT OR REPLACE INTO nodes (id, user_id, type, name, text, subtype, key, metadata_json, created_at, embedding_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT OR REPLACE INTO nodes (id, user_id, type, name, text, subtype, key, metadata_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     canonical_id,
@@ -205,7 +199,6 @@ class GraphStorage:
                     node.key,
                     json.dumps(node_metadata, ensure_ascii=False),
                     created_at,
-                    embedding_json,
                 ),
             )
             await conn.commit()
@@ -219,22 +212,16 @@ class GraphStorage:
                 key=node.key,
                 metadata=node_metadata,
                 created_at=created_at,
-                embedding=node.embedding if node.embedding is not None else (json.loads(embedding_json) if embedding_json else None),
             )
 
-        cursor = await conn.execute("SELECT created_at, embedding_json FROM nodes WHERE id = ?", (node.id,))
+        cursor = await conn.execute("SELECT created_at FROM nodes WHERE id = ?", (node.id,))
         existing = await cursor.fetchone()
         created_at = existing["created_at"] if existing else node.created_at
-        embedding_json = (
-            json.dumps(node.embedding)
-            if node.embedding is not None
-            else (existing["embedding_json"] if existing else None)
-        )
 
         await conn.execute(
             """
-            INSERT OR REPLACE INTO nodes (id, user_id, type, name, text, subtype, key, metadata_json, created_at, embedding_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO nodes (id, user_id, type, name, text, subtype, key, metadata_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 node.id,
@@ -246,7 +233,6 @@ class GraphStorage:
                 None,
                 json.dumps(node_metadata, ensure_ascii=False),
                 created_at,
-                embedding_json,
             ),
         )
         await conn.commit()
@@ -260,7 +246,6 @@ class GraphStorage:
             key=None,
             metadata=node_metadata,
             created_at=created_at,
-            embedding=node.embedding if node.embedding is not None else (json.loads(embedding_json) if embedding_json else None),
         )
 
     async def upsert_nodes_batch(self, nodes_data: list[tuple[Node, dict]]) -> list[Node]:
@@ -278,7 +263,7 @@ class GraphStorage:
             for node, node_metadata in nodes_data:
                 if node.key:
                     cursor = await conn.execute(
-                        "SELECT id, created_at, embedding_json FROM nodes "
+                        "SELECT id, created_at FROM nodes "
                         "WHERE user_id = ? AND type = ? AND key = ?",
                         (node.user_id, node.type, node.key),
                     )
@@ -287,22 +272,17 @@ class GraphStorage:
                     created_at = existing["created_at"] if existing else node.created_at
                 else:
                     cursor = await conn.execute(
-                        "SELECT created_at, embedding_json FROM nodes WHERE id = ?", (node.id,)
+                        "SELECT created_at FROM nodes WHERE id = ?", (node.id,)
                     )
                     existing = await cursor.fetchone()
                     canonical_id = node.id
                     created_at = existing["created_at"] if existing else node.created_at
-                embedding_json = (
-                    json.dumps(node.embedding)
-                    if node.embedding is not None
-                    else (existing["embedding_json"] if existing else None)
-                )
 
                 await conn.execute(
                     """
                     INSERT OR REPLACE INTO nodes
-                      (id, user_id, type, name, text, subtype, key, metadata_json, created_at, embedding_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                      (id, user_id, type, name, text, subtype, key, metadata_json, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         canonical_id,
@@ -314,7 +294,6 @@ class GraphStorage:
                         node.key,
                         json.dumps(node_metadata, ensure_ascii=False),
                         created_at,
-                        embedding_json,
                     ),
                 )
                 saved.append(
@@ -328,7 +307,6 @@ class GraphStorage:
                         key=node.key,
                         metadata=node_metadata,
                         created_at=created_at,
-                        embedding=node.embedding if node.embedding is not None else (json.loads(embedding_json) if embedding_json else None),
                     )
                 )
             await conn.commit()
@@ -739,26 +717,15 @@ class GraphStorage:
             for row in rows
         ]
 
-    async def save_node_embedding(self, node_id: str, embedding: list[float]) -> None:
-        """Сохраняет embedding отдельно, не трогая остальные поля."""
-        await self._ensure_initialized()
-        conn = await self._get_conn()
-        await conn.execute(
-            "UPDATE nodes SET embedding_json = ? WHERE id = ?",
-            (json.dumps(embedding), node_id),
-        )
-        await conn.commit()
-
     async def hybrid_search(
         self,
         user_id: str,
         query_text: str,
-        query_embedding: list[float] | None = None,
         alpha: float = 0.7,
         top_k: int = 10,
         use_rrf: bool = False,
     ) -> list[tuple[Node, float]]:
-        """Hybrid dense + sparse search over user nodes.
+        """Hybrid sparse search over user nodes.
 
         Parameters
         ----------
@@ -766,10 +733,8 @@ class GraphStorage:
             Owner of the nodes to search.
         query_text:
             Raw query string used for TF-IDF sparse scoring.
-        query_embedding:
-            Optional dense query vector for cosine similarity scoring.
         alpha:
-            Weight for dense scores (0 = sparse only, 1 = dense only).
+            Reserved compatibility parameter.
         top_k:
             Maximum number of results to return.
         use_rrf:
@@ -781,49 +746,11 @@ class GraphStorage:
         engine = HybridSearchEngine(alpha=alpha)
         return engine.search(
             query_text=query_text,
-            query_embedding=query_embedding,
+            query_embedding=None,
             nodes=nodes,
             top_k=top_k,
             use_rrf=use_rrf,
         )
-
-    async def find_similar_nodes(
-        self,
-        user_id: str,
-        query_embedding: list[float],
-        top_k: int = 5,
-        node_types: list[str] | None = None,
-        min_similarity: float = 0.75,
-    ) -> list[tuple[Node, float]]:
-        """
-        Косинусное сходство без NumPy — через stdlib math.
-        Возвращает [(node, similarity_score), ...] отсортированный DESC.
-        Загружает только узлы у которых есть embedding_json.
-        """
-        await self._ensure_initialized()
-        conn = await self._get_conn()
-
-        query = "SELECT * FROM nodes WHERE user_id = ? AND embedding_json IS NOT NULL AND (is_deleted IS NULL OR is_deleted = 0)"
-        params: list[object] = [user_id]
-        if node_types:
-            placeholders = ",".join("?" * len(node_types))
-            query += f" AND type IN ({placeholders})"
-            params.extend(node_types)
-
-        cursor = await conn.execute(query, params)
-        rows = await cursor.fetchall()
-
-        results: list[tuple[Node, float]] = []
-        for row in rows:
-            node = _row_to_node(row)
-            if node.embedding is None:
-                continue
-            sim = _cosine_similarity(query_embedding, node.embedding)
-            if sim >= min_similarity:
-                results.append((node, sim))
-
-        results.sort(key=lambda item: item[1], reverse=True)
-        return results[:top_k]
 
     # ── Sprint-0: soft-delete & retention helpers ──────────────────
 
@@ -927,8 +854,6 @@ class GraphStorage:
 
 
 def _row_to_node(row: aiosqlite.Row) -> Node:
-    embedding_raw = row["embedding_json"] if "embedding_json" in row.keys() else None
-    embedding = json.loads(embedding_raw) if embedding_raw else None
     return Node(
         id=row["id"],
         user_id=row["user_id"],
@@ -939,7 +864,6 @@ def _row_to_node(row: aiosqlite.Row) -> Node:
         key=row["key"],
         metadata=json.loads(row["metadata_json"]),
         created_at=row["created_at"],
-        embedding=embedding,
     )
 
 

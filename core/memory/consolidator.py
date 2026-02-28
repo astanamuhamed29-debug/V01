@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from core.graph.model import Node, ebbinghaus_retention, ensure_metadata_defaults
+from core.graph.model import Node, ebbinghaus_retention, ensure_metadata_defaults, get_node_embedding
 from core.graph.storage import GraphStorage
 
 logger = logging.getLogger(__name__)
@@ -108,7 +108,7 @@ class MemoryConsolidator:
         )
 
         # Only keep candidates that have embeddings
-        embedded = [n for n in candidates if n.embedding is not None]
+        embedded = [n for n in candidates if get_node_embedding(n) is not None]
         if len(embedded) < min_cluster_size:
             return ConsolidationReport(clusters_found=0, nodes_merged=0, new_nodes_created=0)
 
@@ -132,9 +132,9 @@ class MemoryConsolidator:
                     "abstraction_level": 1,
                     "consolidation_source": source_ids,
                     "salience_score": 1.0,
+                    "embedding": _mean_embedding([emb for n in cluster if (emb := get_node_embedding(n))]),
                 }),
                 created_at=datetime.now(UTC).isoformat(),
-                embedding=_mean_embedding([n.embedding for n in cluster if n.embedding]),
             )
 
             await self.storage.merge_nodes(user_id, source_ids, merged_node)
@@ -173,7 +173,7 @@ class MemoryConsolidator:
             return AbstractionReport(candidates=len(candidates), abstracted=0)
 
         # Cluster candidates by embedding similarity (reuse consolidation clustering)
-        embedded = [n for n in candidates if n.embedding is not None]
+        embedded = [n for n in candidates if get_node_embedding(n) is not None]
         clusters = _cluster_by_embedding(
             embedded,
             threshold=CONSOLIDATION_SIMILARITY_THRESHOLD,
@@ -199,11 +199,11 @@ class MemoryConsolidator:
                     "abstraction_level": 2,
                     "consolidation_source": source_ids,
                     "salience_score": 1.0,
+                    "embedding": _mean_embedding(
+                        [emb for n in cluster if (emb := get_node_embedding(n))]
+                    ),
                 }),
                 created_at=datetime.now(UTC).isoformat(),
-                embedding=_mean_embedding(
-                    [n.embedding for n in cluster if n.embedding]
-                ),
             )
 
             await self.storage.merge_nodes(user_id, source_ids, archetype)
@@ -320,8 +320,10 @@ def _cluster_by_embedding(
             if j in used:
                 continue
             node_j = nodes[j]
-            if node_i.embedding and node_j.embedding:
-                sim = _cosine_similarity(node_i.embedding, node_j.embedding)
+            emb_i = get_node_embedding(node_i)
+            emb_j = get_node_embedding(node_j)
+            if emb_i and emb_j:
+                sim = _cosine_similarity(emb_i, emb_j)
                 if sim >= threshold:
                     cluster.append(node_j)
                     used.add(j)

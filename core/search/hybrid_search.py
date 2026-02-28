@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from core.graph.model import Node
 
+from core.graph.model import get_node_embedding
+
 __all__ = ["HybridSearchEngine", "rrf_fusion"]
 
 
@@ -171,8 +173,9 @@ class HybridSearchEngine:
 
         if query_embedding is not None:
             dense_scores = [
-                _cosine_similarity(query_embedding, n.embedding) if n.embedding else 0.0
+                _cosine_similarity(query_embedding, emb) if emb else 0.0
                 for n in nodes
+                for emb in [get_node_embedding(n)]
             ]
             effective_alpha = self.alpha
         else:
@@ -208,8 +211,9 @@ class HybridSearchEngine:
 
         if query_embedding is not None:
             dense_pairs = [
-                (n.id, _cosine_similarity(query_embedding, n.embedding) if n.embedding else 0.0)
+                (n.id, _cosine_similarity(query_embedding, emb) if emb else 0.0)
                 for n in nodes
+                for emb in [get_node_embedding(n)]
             ]
             dense_ranked = sorted(dense_pairs, key=lambda item: item[1], reverse=True)
         else:

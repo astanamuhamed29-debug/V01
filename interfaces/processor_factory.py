@@ -1,13 +1,28 @@
 from __future__ import annotations
 
-from config import DB_PATH as _DEFAULT_DB_PATH
+from config import (
+    DB_PATH as _DEFAULT_DB_PATH,
+    QDRANT_API_KEY,
+    QDRANT_COLLECTION,
+    QDRANT_URL,
+)
 from core.analytics.calibrator import ThresholdCalibrator
+from core.context.session_memory import SessionMemory
 from core.graph.api import GraphAPI
 from core.graph.storage import GraphStorage
 from core.journal.storage import JournalStorage
 from core.llm.embedding_service import EmbeddingService
 from core.llm_client import OpenRouterQwenClient
 from core.pipeline.processor import MessageProcessor
+from core.search.qdrant_storage import QdrantVectorStorage
+
+
+class _NoopQdrant:
+    def upsert_embeddings_batch(self, points: list[dict]) -> None:
+        return
+
+    def search_similar(self, *args, **kwargs) -> list:
+        return []
 
 
 def build_processor(db_path: str | None = None) -> MessageProcessor:
@@ -25,10 +40,23 @@ def build_processor(db_path: str | None = None) -> MessageProcessor:
                 embedding_service = EmbeddingService(client)
     except Exception:
         embedding_service = None
+
+    try:
+        qdrant: QdrantVectorStorage | _NoopQdrant = QdrantVectorStorage(
+            url=QDRANT_URL,
+            api_key=QDRANT_API_KEY or None,
+            collection_name=QDRANT_COLLECTION,
+        )
+    except Exception:
+        qdrant = _NoopQdrant()
+
+    session_memory = SessionMemory()
     calibrator = ThresholdCalibrator(graph_storage)
     return MessageProcessor(
         graph_api=graph_api,
         journal=journal_storage,
+        qdrant=qdrant,
+        session_memory=session_memory,
         llm_client=llm_client,
         embedding_service=embedding_service,
         calibrator=calibrator,

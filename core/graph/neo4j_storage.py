@@ -114,14 +114,12 @@ class Neo4jStorage:
                     n.key        = $key,
                     n.metadata   = $metadata_json,
                     n.created_at = $created_at,
-                    n.embedding  = $embedding_json,
                     n.is_deleted = 0
                 ON MATCH SET
                     n.name       = COALESCE($name, n.name),
                     n.text       = COALESCE($text, n.text),
                     n.subtype    = COALESCE($subtype, n.subtype),
-                    n.metadata   = $metadata_json,
-                    n.embedding  = COALESCE($embedding_json, n.embedding)
+                    n.metadata   = $metadata_json
                 RETURN n
                 """,
                 id=node.id,
@@ -133,9 +131,6 @@ class Neo4jStorage:
                 key=node.key,
                 metadata_json=json.dumps(node_metadata, ensure_ascii=False),
                 created_at=node.created_at,
-                embedding_json=(
-                    json.dumps(node.embedding) if node.embedding else None
-                ),
             )
             record = await result.single()
 
@@ -477,8 +472,6 @@ class Neo4jStorage:
 def _record_to_node(props: Any) -> Node:
     """Convert a Neo4j node record to a :class:`Node`."""
     metadata = json.loads(props.get("metadata", "{}"))
-    embedding_raw = props.get("embedding")
-    embedding = json.loads(embedding_raw) if embedding_raw else None
     return Node(
         id=props["id"],
         user_id=props["user_id"],
@@ -489,7 +482,6 @@ def _record_to_node(props: Any) -> Node:
         key=props.get("key"),
         metadata=metadata,
         created_at=props.get("created_at", ""),
-        embedding=embedding,
     )
 
 

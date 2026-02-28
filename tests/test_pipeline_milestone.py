@@ -1,9 +1,18 @@
 import asyncio
 
+from core.context.session_memory import SessionMemory
 from core.graph.api import GraphAPI
 from core.graph.storage import GraphStorage
 from core.journal.storage import JournalStorage
 from core.pipeline.processor import MessageProcessor
+
+
+class _NoopQdrant:
+    def upsert_embeddings_batch(self, points):
+        return
+
+    def search_similar(self, *args, **kwargs):
+        return []
 
 
 def test_milestone_scenario_builds_expected_graph(tmp_path):
@@ -11,7 +20,12 @@ def test_milestone_scenario_builds_expected_graph(tmp_path):
         db_path = tmp_path / "self_os.db"
         api = GraphAPI(GraphStorage(db_path=db_path))
         journal = JournalStorage(db_path=db_path)
-        processor = MessageProcessor(graph_api=api, journal=journal)
+        processor = MessageProcessor(
+            graph_api=api,
+            journal=journal,
+            qdrant=_NoopQdrant(),
+            session_memory=SessionMemory(),
+        )
 
         try:
             messages = [
@@ -51,7 +65,12 @@ def test_relocation_phrase_creates_relocation_project(tmp_path):
         db_path = tmp_path / "self_os.db"
         api = GraphAPI(GraphStorage(db_path=db_path))
         journal = JournalStorage(db_path=db_path)
-        processor = MessageProcessor(graph_api=api, journal=journal)
+        processor = MessageProcessor(
+            graph_api=api,
+            journal=journal,
+            qdrant=_NoopQdrant(),
+            session_memory=SessionMemory(),
+        )
 
         try:
             await processor.process(user_id="321", text="Привет, я хочу переехать", source="telegram")

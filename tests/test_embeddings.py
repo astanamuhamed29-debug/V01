@@ -1,7 +1,7 @@
 import asyncio
 from typing import Any, cast
 
-from core.graph.storage import GraphStorage, _cosine_similarity
+from core.graph.storage import _cosine_similarity
 from core.llm.embedding_service import EmbeddingService, _node_to_embed_text
 
 
@@ -57,13 +57,3 @@ def test_embedding_cache():
     asyncio.run(scenario())
 
 
-def test_find_similar_nodes_empty(tmp_path):
-    async def scenario() -> None:
-        storage = GraphStorage(tmp_path / "test.db")
-        try:
-            result = await storage.find_similar_nodes("u1", [1.0, 0.0], top_k=3)
-            assert result == []
-        finally:
-            await storage.close()
-
-    asyncio.run(scenario())
