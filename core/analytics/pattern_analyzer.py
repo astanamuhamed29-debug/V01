@@ -61,6 +61,8 @@ class PatternReport:
     part_dynamics: list[PartDynamics]
     mood_snapshots_count: int
     has_enough_data: bool
+    last_activity_at: str | None = None
+    # NOTE: improved field for proactive silence detector to avoid report.insight_text transport hack.
     insight_text: str | None = None
 
 
@@ -92,12 +94,14 @@ class PatternAnalyzer:
             cognition_patterns,
             part_dynamics,
             snapshots,
+            last_activity_at,
         ) = await asyncio.gather(
             self._find_trigger_patterns(user_id, since_iso),
             self._build_need_profile(user_id, since_iso),
             self._find_cognition_patterns(user_id, since_iso),
             self._build_part_dynamics(user_id),
             self.storage.get_mood_snapshots(user_id, limit=30),
+            self.storage.get_last_activity_at(user_id),
         )
 
         total_nodes = await self._count_nodes(user_id)
@@ -112,6 +116,7 @@ class PatternAnalyzer:
             part_dynamics=part_dynamics,
             mood_snapshots_count=len(snapshots),
             has_enough_data=has_enough,
+            last_activity_at=last_activity_at,
         )
 
     async def _find_trigger_patterns(self, user_id: str, since_iso: str) -> list[TriggerPattern]:

@@ -98,6 +98,13 @@ class GraphStorage:
 
                 CREATE INDEX IF NOT EXISTS idx_mood_snapshots_user_ts
                     ON mood_snapshots (user_id, timestamp DESC);
+
+                CREATE TABLE IF NOT EXISTS scheduler_state (
+                    user_id TEXT PRIMARY KEY,
+                    last_proactive_at TEXT,
+                    last_checked_at TEXT,
+                    total_sent INTEGER NOT NULL DEFAULT 0
+                );
                 """
             )
             await conn.commit()
@@ -513,6 +520,82 @@ class GraphStorage:
         )
         row = await cursor.fetchone()
         return int(row[0]) if row else 0
+
+    async def get_all_user_ids(self) -> list[str]:
+        """Все уникальные user_id у которых есть узлы в графе."""
+        await self._ensure_initialized()
+        conn = await self._get_conn()
+        cursor = await conn.execute(
+            "SELECT DISTINCT user_id FROM nodes ORDER BY user_id"
+        )
+        rows = await cursor.fetchall()
+        return [row[0] for row in rows]
+
+    async def get_last_activity_at(self, user_id: str) -> str | None:
+        """
+        ISO datetime последнего созданного узла пользователя.
+        Используется чтобы не беспокоить неактивных пользователей.
+        """
+        await self._ensure_initialized()
+        conn = await self._get_conn()
+        cursor = await conn.execute(
+            "SELECT MAX(created_at) FROM nodes WHERE user_id = ?",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+        return row[0] if row and row[0] else None
+
+    async def get_scheduler_state(self, user_id: str) -> dict | None:
+        """Состояние scheduler для пользователя."""
+        await self._ensure_initialized()
+        conn = await self._get_conn()
+        cursor = await conn.execute(
+            "SELECT * FROM scheduler_state WHERE user_id = ?",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def upsert_scheduler_state(
+        self,
+        user_id: str,
+        last_proactive_at: str | None = None,
+        last_checked_at: str | None = None,
+        increment_sent: bool = False,
+    ) -> None:
+        """Обновляет состояние scheduler. Создаёт запись если нет."""
+        await self._ensure_initialized()
+        conn = await self._get_conn()
+        now = datetime.now(timezone.utc).isoformat()
+
+        existing = await self.get_scheduler_state(user_id)
+        if existing is None:
+            await conn.execute(
+                """
+                INSERT INTO scheduler_state
+                  (user_id, last_proactive_at, last_checked_at, total_sent)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    last_proactive_at,
+                    last_checked_at or now,
+                    1 if increment_sent else 0,
+                ),
+            )
+        else:
+            total = existing.get("total_sent", 0) + (1 if increment_sent else 0)
+            await conn.execute(
+                """
+                UPDATE scheduler_state
+                SET last_proactive_at = COALESCE(?, last_proactive_at),
+                    last_checked_at   = COALESCE(?, last_checked_at),
+                    total_sent        = ?
+                WHERE user_id = ?
+                """,
+                (last_proactive_at, last_checked_at or now, total, user_id),
+            )
+        await conn.commit()
 
 
 def _row_to_node(row: aiosqlite.Row) -> Node:

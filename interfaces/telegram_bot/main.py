@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from config import LOG_LEVEL
 from core.analytics.pattern_analyzer import PatternAnalyzer
 from core.pipeline.processor import MessageProcessor
+from core.scheduler.proactive_scheduler import ProactiveScheduler
 from interfaces.processor_factory import build_processor
 
 router = Router()
@@ -131,13 +132,20 @@ async def run_bot() -> None:
     processor = build_processor()
     if not hasattr(processor, "pattern_analyzer"):
         processor.pattern_analyzer = PatternAnalyzer(processor.graph_api.storage)
+    scheduler = ProactiveScheduler(
+        bot=bot,
+        storage=processor.graph_api.storage,
+        analyzer=processor.pattern_analyzer,
+    )
     dispatcher = Dispatcher()
     dispatcher["processor"] = processor
     dispatcher.include_router(router)
 
     try:
+        scheduler.start()
         await dispatcher.start_polling(bot)
     finally:
+        await scheduler.stop()
         await bot.session.close()
         if hasattr(processor.graph_api.storage, "close"):
             await processor.graph_api.storage.close()
