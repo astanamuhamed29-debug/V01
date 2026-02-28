@@ -1,0 +1,15 @@
+version: "3.9"
+
+services:
+  self-os-bot:
+    build: .
+    image: self-os-bot:latest
+    container_name: self-os-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    environment:
+      - DB_PATH=/app/data/self_os.db
+      - LOG_LEVEL=INFO

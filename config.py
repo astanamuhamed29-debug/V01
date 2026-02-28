@@ -10,3 +10,4 @@ LLM_MODEL_ID = os.getenv(
 )
 USE_LLM = bool(int(os.getenv("SELFOS_USE_LLM", "1")))
 LOG_LEVEL = os.getenv("LOG_LEVEL", os.getenv("SELFOS_LOG_LEVEL", "INFO")).upper()
+MAX_TEXT_LENGTH = int(os.getenv("MAX_TEXT_LENGTH", "10000"))
