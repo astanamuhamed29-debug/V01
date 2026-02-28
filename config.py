@@ -11,3 +11,9 @@ LLM_MODEL_ID = os.getenv(
 USE_LLM = bool(int(os.getenv("SELFOS_USE_LLM", "1")))
 LOG_LEVEL = os.getenv("LOG_LEVEL", os.getenv("SELFOS_LOG_LEVEL", "INFO")).upper()
 MAX_TEXT_LENGTH = int(os.getenv("MAX_TEXT_LENGTH", "10000"))
+
+# ── Neo4j (Stage 2: Semantic Memory layer) ───────────────────────
+NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
+NEO4J_DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")
