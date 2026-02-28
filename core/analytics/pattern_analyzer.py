@@ -117,6 +117,15 @@ class PatternAnalyzer:
     async def _find_trigger_patterns(self, user_id: str, since_iso: str) -> list[TriggerPattern]:
         edges = await self.storage.get_edges_by_relation(user_id, "TRIGGERS")
 
+        node_ids_to_warm: list[str] = []
+        for edge in edges:
+            if edge.source_node_id:
+                node_ids_to_warm.append(edge.source_node_id)
+            if edge.target_node_id:
+                node_ids_to_warm.append(edge.target_node_id)
+        await self._warm_node_cache(user_id, node_ids_to_warm)
+        # NOTE: improved trigger pattern scan by bulk warming node cache (avoids N+1 get_node calls).
+
         grouped: dict[tuple[str, str, str, str], dict] = {}
         for edge in edges:
             if not self._is_after(edge.created_at, since_iso):
@@ -327,6 +336,14 @@ class PatternAnalyzer:
             return None
         self._node_cache[node_id] = node
         return node
+
+    async def _warm_node_cache(self, user_id: str, node_ids: list[str]) -> None:
+        missing = [node_id for node_id in dict.fromkeys(node_ids) if node_id not in self._node_cache]
+        if not missing:
+            return
+        nodes = await self.storage.get_nodes_by_ids(user_id, missing)
+        for node in nodes:
+            self._node_cache[node.id] = node
 
     @staticmethod
     def _target_name(node: Node) -> str:

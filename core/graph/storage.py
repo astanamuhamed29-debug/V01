@@ -444,6 +444,21 @@ class GraphStorage:
         row = await cursor.fetchone()
         return _row_to_node(row) if row else None
 
+    async def get_nodes_by_ids(self, user_id: str, node_ids: list[str]) -> list[Node]:
+        """Возвращает узлы пользователя по списку id одним SQL-запросом."""
+        if not node_ids:
+            return []
+
+        await self._ensure_initialized()
+        conn = await self._get_conn()
+
+        unique_ids = list(dict.fromkeys(node_ids))
+        placeholders = ", ".join("?" for _ in unique_ids)
+        query = f"SELECT * FROM nodes WHERE user_id = ? AND id IN ({placeholders})"
+        cursor = await conn.execute(query, [user_id, *unique_ids])
+        rows = await cursor.fetchall()
+        return [_row_to_node(row) for row in rows]
+
     async def list_edges(self, user_id: str) -> list[Edge]:
         await self._ensure_initialized()
 
