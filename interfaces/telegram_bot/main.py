@@ -12,6 +12,7 @@ from core.pipeline.processor import MessageProcessor
 from interfaces.processor_factory import build_processor
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 
 def _get_bot_token() -> str:
@@ -52,14 +53,20 @@ async def handle_incoming_message(message: Message, processor) -> None:
         return
 
     user_id = str(message.from_user.id)
-    result = await processor.process(
-        user_id,
-        message.text,
-        source="telegram",
-    )
+    try:
+        logger.info("Telegram message received from user=%s", user_id)
+        result = await processor.process(
+            user_id,
+            message.text,
+            source="telegram",
+        )
 
-    if result.reply_text:
-        await message.answer(result.reply_text)
+        if result.reply_text:
+            await message.answer(result.reply_text)
+            logger.info("Telegram reply sent to user=%s", user_id)
+    except Exception:
+        logger.exception("Telegram handler failed for user=%s", user_id)
+        await message.answer("Поймал ошибку при обработке сообщения. Попробуй ещё раз.")
 
 
 if __name__ == "__main__":
