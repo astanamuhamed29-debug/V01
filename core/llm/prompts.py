@@ -7,12 +7,11 @@ SCHEMA:
   "intent": "REFLECTION|EVENT_REPORT|IDEA|TASK_LIKE|FEELING_REPORT|META",
   "nodes": [
     {"id": "n1", "type": "NOTE|PROJECT|TASK|BELIEF|VALUE|PART|EVENT|EMOTION|SOMA",
-     "name": "...", "text": "...", "subtype": "...", "key": "...", "metadata": {}}
+     "name": "...", "text": "...", "subtype": "...", "key": "..."}
   ],
   "edges": [
     {"source_node_id": "n1_or_person:me", "target_node_id": "n2",
-     "relation": "HAS_VALUE|HOLDS_BELIEF|OWNS_PROJECT|HAS_TASK|RELATES_TO|DESCRIBES_EVENT|FEELS|EMOTION_ABOUT|EXPRESSED_AS|HAS_PART|TRIGGERED_BY|PROTECTS|CONFLICTS_WITH|SUPPORTS",
-     "metadata": {}}
+     "relation": "..."}
   ]
 }
 
@@ -24,6 +23,7 @@ SCHEMA:
 5. Иначе → REFLECTION
 
 ПРАВИЛА УЗЛОВ:
+- relation используй только из списка: HAS_VALUE, HOLDS_BELIEF, OWNS_PROJECT, HAS_TASK, RELATES_TO, DESCRIBES_EVENT, FEELS, EMOTION_ABOUT, EXPRESSED_AS, HAS_PART, TRIGGERED_BY, PROTECTS, CONFLICTS_WITH, SUPPORTS
 - EMOTION: обязательно metadata.label, metadata.valence (-1..1), metadata.arousal (-1..1), metadata.dominance (-1..1, контроль над ситуацией: злость=+0.7, стыд=-0.5, страх=-0.6, радость=+0.4), metadata.intensity (0..1, сила эмоции)
 - "между X и Y" или "X и Y" при перечислении эмоций → два отдельных EMOTION-узла
 - SOMA: metadata.location (часть тела), metadata.sensation (ощущение)

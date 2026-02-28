@@ -130,12 +130,25 @@ class OpenRouterQwenClient:
                 model=self.model_id,
                 temperature=0,
                 messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT_EXTRACTOR},
+                    {
+                        "role": "system",
+                        "content": SYSTEM_PROMPT_EXTRACTOR,
+                        "cache_control": {"type": "ephemeral"},
+                    },
                     {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
                 ],
             )
         except Exception:
             return ""
+
+        usage = getattr(completion, "usage", None)
+        if usage:
+            logger.info(
+                "LLM tokens: prompt=%s completion=%s total=%s",
+                getattr(usage, "prompt_tokens", "?"),
+                getattr(usage, "completion_tokens", "?"),
+                getattr(usage, "total_tokens", "?"),
+            )
 
         if not completion.choices:
             return ""
