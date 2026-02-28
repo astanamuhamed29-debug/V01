@@ -22,7 +22,7 @@ def classify(text: str) -> str:
     if re.search(r"\b(надо|нужно|сделать|задача|дедлайн|план)\b", lowered):
         return "TASK_LIKE"
 
-    if re.search(r"\b(боюсь|страшно|тревож|груст|злюсь|чувствую)\b", lowered):
+    if re.search(r"\b(боюсь|страшно|тревож|груст|злюсь|чувствую|ненавижу\s+себя|стыд|устал|беспомощ|залип)\b", lowered):
         return "FEELING_REPORT"
 
     if re.search(r"\b(идея|придумал|хочу сделать|можно сделать)\b", lowered):

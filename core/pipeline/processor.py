@@ -14,6 +14,7 @@ from core.graph.model import Edge, Node
 from core.journal.storage import JournalStorage
 from core.llm_client import LLMClient, MockLLMClient
 from core.mood.tracker import MoodTracker
+from core.parts.memory import PartsMemory
 from core.pipeline import extractor_emotion, extractor_parts, extractor_semantic, router
 from core.pipeline.events import EventBus
 
@@ -61,6 +62,7 @@ class MessageProcessor:
         self.use_llm = USE_LLM if use_llm is None else use_llm
         self.event_bus = event_bus or EventBus()
         self.mood_tracker = MoodTracker(graph_api.storage)
+        self.parts_memory = PartsMemory(graph_api.storage)
 
     async def process_message(
         self,
@@ -101,6 +103,13 @@ class MessageProcessor:
                     relation="HAS_TASK",
                 )
 
+        part_nodes = [node for node in created_nodes if node.type == "PART"]
+        parts_context: list[dict] = []
+        for part in part_nodes:
+            await self.parts_memory.register_appearance(user_id, part)
+            if part.key:
+                parts_context.append(await self.parts_memory.get_part_history(user_id, part.key))
+
         emotion_nodes = [node for node in created_nodes if node.type == "EMOTION"]
         mood_context = await self.mood_tracker.update(user_id, emotion_nodes)
 
@@ -112,6 +121,7 @@ class MessageProcessor:
                 "edges": [*created_edges],
             },
             mood_context=mood_context,
+            parts_context=parts_context,
         )
 
         self.event_bus.publish(

@@ -15,6 +15,7 @@ EMOTION_RULES: list[tuple[re.Pattern[str], str, float, float, float, float]] = [
     (re.compile(r"\b(груст|печал)\w*\b"), "грусть", -0.7, -0.2, -0.4, 0.7),
     (re.compile(r"\b(радость|рад|счастлив)\w*\b"), "радость", 0.8, 0.4, 0.4, 0.8),
     (re.compile(r"\b(ступор)\w*\b"), "ступор", -0.4, -0.3, -0.5, 0.65),
+    (re.compile(r"ненавижу\s+себя|презираю\s+себя|я\s+никчем"), "стыд", -0.8, -0.3, -0.6, 0.9),
 ]
 
 
@@ -55,7 +56,7 @@ async def extract(user_id: str, text: str, intent: str, person_id: str) -> tuple
     edges: list[Edge] = []
 
     lowered = text.lower()
-    if not re.search(r"\b(боюсь|страшно|страх|тревож|рад|радость|злюсь|злость|груст|печал|стыд|устал|вина|обида|ступор|чувствую)\b", lowered):
+    if not re.search(r"\b(боюсь|страшно|страх|тревож|рад|радость|злюсь|злость|груст|печал|стыд|устал|вина|обида|ступор|чувствую|ненавижу\s+себя|презираю\s+себя)\b", lowered):
         return nodes, edges
 
     emotions = _detect_emotions(lowered)
