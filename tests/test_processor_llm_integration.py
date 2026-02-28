@@ -41,6 +41,16 @@ class FencedLLMClient:
             ],
         }
 
+    async def generate_live_reply(
+        self,
+        user_text: str,
+        intent: str,
+        mood_context: dict | None,
+        parts_context: list[dict] | None,
+        graph_context: dict | None,
+    ) -> str:
+        return ""
+
 
 class BrokenLLMClient:
     async def classify_intent(self, text: str) -> str:
@@ -57,6 +67,16 @@ class BrokenLLMClient:
 
     async def extract_emotion(self, text: str, intent: str):
         return {"nodes": [], "edges": []}
+
+    async def generate_live_reply(
+        self,
+        user_text: str,
+        intent: str,
+        mood_context: dict | None,
+        parts_context: list[dict] | None,
+        graph_context: dict | None,
+    ) -> str:
+        return ""
 
 
 def test_processor_parses_fenced_llm_json_into_graph(tmp_path):

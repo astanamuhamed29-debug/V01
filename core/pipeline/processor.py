@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -132,6 +133,24 @@ class MessageProcessor:
             graph_context=graph_context,
         )
 
+        live_reply_enabled = os.getenv("LIVE_REPLY_ENABLED", "true").lower() == "true"
+        final_reply = reply_text
+        if live_reply_enabled:
+            live_reply = ""
+            try:
+                live_reply = await self.llm_client.generate_live_reply(
+                    user_text=text,
+                    intent=intent,
+                    mood_context=mood_context,
+                    parts_context=parts_context,
+                    graph_context=graph_context,
+                )
+            except Exception as exc:
+                logger.warning("live_reply failed, using template: %s", exc)
+
+            if live_reply:
+                final_reply = live_reply
+
         self.event_bus.publish(
             "pipeline.processed",
             {
@@ -142,7 +161,7 @@ class MessageProcessor:
             },
         )
 
-        return ProcessResult(intent=intent, reply_text=reply_text, nodes=created_nodes, edges=created_edges)
+        return ProcessResult(intent=intent, reply_text=final_reply, nodes=created_nodes, edges=created_edges)
 
     async def process(
         self,

@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 
 from config import LLM_MODEL_ID
 from core.llm.prompts import SYSTEM_PROMPT_EXTRACTOR
+from core.llm.reply_prompt import REPLY_SYSTEM_PROMPT
 
 
 import logging
@@ -26,6 +27,15 @@ class LLMClient(Protocol):
     async def extract_parts(self, text: str, intent: str) -> dict[str, Any] | str: ...
 
     async def extract_emotion(self, text: str, intent: str) -> dict[str, Any] | str: ...
+
+    async def generate_live_reply(
+        self,
+        user_text: str,
+        intent: str,
+        mood_context: dict | None,
+        parts_context: list[dict] | None,
+        graph_context: dict | None,
+    ) -> str: ...
 
 
 class MockLLMClient:
@@ -50,6 +60,16 @@ class MockLLMClient:
 
     async def extract_emotion(self, text: str, intent: str) -> dict[str, Any]:
         return {"nodes": [], "edges": []}
+
+    async def generate_live_reply(
+        self,
+        user_text: str,
+        intent: str,
+        mood_context: dict | None,
+        parts_context: list[dict] | None,
+        graph_context: dict | None,
+    ) -> str:
+        return ""
 
 
 class OpenRouterQwenClient:
@@ -113,6 +133,111 @@ class OpenRouterQwenClient:
 
     async def extract_emotion(self, text: str, intent: str) -> dict[str, Any] | str:
         return await self._extract_by_scope(text=text, intent=intent, scope="emotion")
+
+    async def generate_live_reply(
+        self,
+        user_text: str,
+        intent: str,
+        mood_context: dict | None,
+        parts_context: list[dict] | None,
+        graph_context: dict | None,
+    ) -> str:
+        context_lines: list[str] = []
+
+        if graph_context and graph_context.get("has_history"):
+            trend = graph_context.get("mood_trend", "unknown")
+            if trend == "declining":
+                context_lines.append("Тренд последних дней: становится тяжелее")
+            elif trend == "improving":
+                context_lines.append("Тренд последних дней: становится легче")
+
+            recurring = graph_context.get("recurring_emotions", [])
+            if recurring:
+                top = recurring[0]
+                context_lines.append(
+                    f"Повторяющееся состояние: {top.get('label', '')} ({top.get('count', 0)} раз)"
+                )
+
+            values = graph_context.get("known_values", [])
+            if values:
+                val_names = ", ".join(v.get("name", "") for v in values[:2] if v.get("name"))
+                if val_names:
+                    context_lines.append(f"Важные ценности: {val_names}")
+
+        if mood_context:
+            label = mood_context.get("dominant_label")
+            d = mood_context.get("dominance_avg", 0)
+            if label:
+                feel_str = f"Текущее состояние: {label}"
+                if d < -0.3:
+                    feel_str += " (ощущение потери контроля)"
+                elif d > 0.3:
+                    feel_str += " (ощущение контроля)"
+                context_lines.append(feel_str)
+
+        if parts_context:
+            for ph in parts_context:
+                if not ph.get("part"):
+                    continue
+                part = ph["part"]
+                appearances = ph.get("appearances", 1)
+                name = part.name or part.subtype or ""
+                voice = part.metadata.get("voice", "")
+                line = f"Активная часть: {name}"
+                if appearances > 1:
+                    line += f" (появляется {appearances}-й раз)"
+                if voice:
+                    line += f", голос: «{voice}»"
+                context_lines.append(line)
+
+        context_block = "\n".join(context_lines) if context_lines else "Первое обращение пользователя."
+
+        user_payload = (
+            f"Intent: {intent}\n"
+            f"Сообщение: {user_text}\n\n"
+            f"Контекст:\n{context_block}\n\n"
+            "Ответь пользователю."
+        )
+
+        client = self._get_client()
+        if client is None:
+            return ""
+
+        try:
+            completion = await client.chat.completions.create(
+                model=self.model_id,
+                temperature=0.7,
+                max_tokens=300,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": REPLY_SYSTEM_PROMPT,
+                        "cache_control": {"type": "ephemeral"},
+                    },
+                    {
+                        "role": "user",
+                        "content": user_payload,
+                    },
+                ],
+            )
+        except Exception as exc:
+            logger.error("generate_live_reply failed: %s", exc)
+            return ""
+
+        usage = getattr(completion, "usage", None)
+        if usage:
+            logger.info(
+                "LiveReply tokens: prompt=%s completion=%s total=%s",
+                getattr(usage, "prompt_tokens", "?"),
+                getattr(usage, "completion_tokens", "?"),
+                getattr(usage, "total_tokens", "?"),
+            )
+
+        if not completion.choices:
+            return ""
+
+        reply = completion.choices[0].message.content or ""
+        return reply.strip()
 
     async def _extract_by_scope(self, *, text: str, intent: str, scope: str) -> dict[str, Any] | str:
         payload = {
