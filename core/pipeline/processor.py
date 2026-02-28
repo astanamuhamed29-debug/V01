@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from agents.reply_minimal import generate_reply
 from config import MAX_TEXT_LENGTH, USE_LLM
@@ -88,6 +89,10 @@ class MessageProcessor:
         self.context_builder = GraphContextBuilder(graph_api.storage, embedding_service=self.embedding_service)
         self.pattern_analyzer = self.context_builder.pattern_analyzer
         self.live_reply_enabled: bool = os.getenv("LIVE_REPLY_ENABLED", "true").lower() == "true"
+        self._calibrator_loaded: set[str] = set()
+        # Sprint-0: session tracking — 30-minute inactivity gap starts new session
+        self._sessions: dict[str, tuple[str, datetime]] = {}  # user_id → (session_id, last_ts)
+        self._session_gap = timedelta(minutes=30)
 
     async def process_message(
         self,
@@ -102,7 +107,21 @@ class MessageProcessor:
             raise ValueError(f"Message too long: {len(text)} chars (max {MAX_TEXT_LENGTH})")
         ts = timestamp or datetime.now(timezone.utc).isoformat()
 
-        await self.journal.append(user_id=user_id, timestamp=ts, text=text, source=source)
+        # Sprint-0: auto-load calibrator thresholds once per user
+        if self.calibrator and user_id not in self._calibrator_loaded:
+            try:
+                await self.calibrator.load(user_id)
+            except Exception as exc:
+                logger.warning("ThresholdCalibrator.load failed: %s", exc)
+            self._calibrator_loaded.add(user_id)
+
+        # Sprint-0: session tracking
+        session_id = self._resolve_session_id(user_id)
+
+        await self.journal.append(
+            user_id=user_id, timestamp=ts, text=text, source=source,
+            session_id=session_id,
+        )
         self.event_bus.publish("journal.appended", {"user_id": user_id, "text": text})
 
         intent = router.classify(text)
@@ -228,6 +247,17 @@ class MessageProcessor:
         )
 
         return ProcessResult(intent=intent, reply_text=final_reply, nodes=created_nodes, edges=created_edges)
+
+    def _resolve_session_id(self, user_id: str) -> str:
+        """Return current session id or create a new one after inactivity gap."""
+        now = datetime.now(timezone.utc)
+        prev = self._sessions.get(user_id)
+        if prev is None or (now - prev[1]) > self._session_gap:
+            sid = str(uuid4())
+            self._sessions[user_id] = (sid, now)
+            return sid
+        self._sessions[user_id] = (prev[0], now)
+        return prev[0]
 
     async def _embed_and_save_nodes(self, nodes: list[Node]) -> None:
         if not self.embedding_service:
