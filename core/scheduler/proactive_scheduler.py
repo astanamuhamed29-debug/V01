@@ -58,6 +58,7 @@ class SignalDetector:
             self._detect_part_surge,
             self._detect_unmet_need,
             self._detect_distortion_spike,
+            self._detect_syndrome,
             self._detect_silence_break,
         ]
         for detector in detectors:
@@ -208,6 +209,32 @@ class SignalDetector:
             score=0.35,
             message="Давно не виделись. Как ты сейчас?",
             context={"last_activity_at": report.last_activity_at},
+        )
+
+    def _detect_syndrome(self, report: PatternReport) -> ProactiveSignal | None:
+        if not report.syndromes:
+            return None
+
+        top_syndrome = report.syndromes[0]
+        if top_syndrome.score < 0.6:
+            return None
+
+        names = [name for name in top_syndrome.nodes if len(name) < 20][:3]
+        if len(names) < 2:
+            return None
+
+        message = (
+            "Я анализировал структуру твоих записей и заметил устойчивый узел. "
+            f"Каждый раз, когда сходятся {', '.join(names)} — возникает сильное напряжение. "
+            "Как думаешь, что их связывает?"
+        )
+
+        return ProactiveSignal(
+            user_id=report.user_id,
+            signal_type="syndrome_detected",
+            score=0.75,
+            message=message,
+            context={"nodes": top_syndrome.nodes},
         )
 
 

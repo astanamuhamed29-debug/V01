@@ -95,6 +95,8 @@ class GraphContextBuilder:
                 need_profile=[],
                 cognition_patterns=[],
                 part_dynamics=[],
+                syndromes=[],
+                implicit_links=[],
                 mood_snapshots_count=0,
                 has_enough_data=False,
             )
@@ -124,6 +126,14 @@ class GraphContextBuilder:
                 "dominant_need": item.dominant_need,
             }
             for item in pattern_report.part_dynamics[:3]
+        ]
+        context["syndromes"] = [
+            {"nodes": item.nodes, "core": item.core_theme}
+            for item in pattern_report.syndromes[:2]
+        ]
+        context["implicit_links"] = [
+            f"{item.source_name} <-> {item.target_name} ({item.reason})"
+            for item in pattern_report.implicit_links[:2]
         ]
 
         logger.debug(

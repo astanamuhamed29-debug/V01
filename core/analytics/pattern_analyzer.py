@@ -4,8 +4,12 @@ import asyncio
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from typing import cast
 
-from core.graph.model import Node
+import networkx as nx  # type: ignore[import-not-found]
+from networkx.algorithms import community  # type: ignore[import-not-found]
+
+from core.graph.model import Edge, Node
 from core.graph.storage import GraphStorage
 
 
@@ -52,6 +56,27 @@ class PartDynamics:
 
 
 @dataclass(slots=True)
+class Syndrome:
+    """Плотно связанный кластер узлов (Паттерн-синдром)."""
+
+    nodes: list[str]
+    core_theme: str
+    score: float
+
+
+@dataclass(slots=True)
+class ImplicitLink:
+    """Предсказанная скрытая связь между узлами."""
+
+    source_name: str
+    target_name: str
+    source_type: str
+    target_type: str
+    probability_score: float
+    reason: str
+
+
+@dataclass(slots=True)
 class PatternReport:
     user_id: str
     generated_at: str
@@ -59,6 +84,8 @@ class PatternReport:
     need_profile: list[NeedProfile]
     cognition_patterns: list[CognitionPattern]
     part_dynamics: list[PartDynamics]
+    syndromes: list[Syndrome]
+    implicit_links: list[ImplicitLink]
     mood_snapshots_count: int
     has_enough_data: bool
     last_activity_at: str | None = None
@@ -88,6 +115,16 @@ class PatternAnalyzer:
 
         self._node_cache.clear()
 
+        gathered = await asyncio.gather(
+            self._find_trigger_patterns(user_id, since_iso),
+            self._build_need_profile(user_id, since_iso),
+            self._find_cognition_patterns(user_id, since_iso),
+            self._build_part_dynamics(user_id),
+            self.storage.get_mood_snapshots(user_id, limit=30),
+            self.storage.get_last_activity_at(user_id),
+            self.storage.find_nodes(user_id, limit=2000),
+            self.storage.list_edges(user_id),
+        )
         (
             trigger_patterns,
             need_profile,
@@ -95,14 +132,24 @@ class PatternAnalyzer:
             part_dynamics,
             snapshots,
             last_activity_at,
-        ) = await asyncio.gather(
-            self._find_trigger_patterns(user_id, since_iso),
-            self._build_need_profile(user_id, since_iso),
-            self._find_cognition_patterns(user_id, since_iso),
-            self._build_part_dynamics(user_id),
-            self.storage.get_mood_snapshots(user_id, limit=30),
-            self.storage.get_last_activity_at(user_id),
+            all_nodes,
+            all_edges,
+        ) = cast(
+            tuple[
+                list[TriggerPattern],
+                list[NeedProfile],
+                list[CognitionPattern],
+                list[PartDynamics],
+                list[dict],
+                str | None,
+                list[Node],
+                list[Edge],
+            ],
+            gathered,
         )
+
+        syndromes = self._find_syndromes(all_nodes, all_edges)
+        implicit_links = self._predict_implicit_links(all_nodes, all_edges)
 
         total_nodes = await self._count_nodes(user_id)
         has_enough = total_nodes > 10
@@ -114,10 +161,97 @@ class PatternAnalyzer:
             need_profile=need_profile,
             cognition_patterns=cognition_patterns,
             part_dynamics=part_dynamics,
+            syndromes=syndromes,
+            implicit_links=implicit_links,
             mood_snapshots_count=len(snapshots),
             has_enough_data=has_enough,
             last_activity_at=last_activity_at,
         )
+
+    def _build_nx_graph(self, nodes: list[Node], edges: list[Edge]) -> nx.Graph:
+        graph = nx.Graph()
+        for node in nodes:
+            name = (node.name or node.key or node.text or node.id)[:50]
+            graph.add_node(node.id, type=node.type, name=name, created_at=node.created_at)
+        for edge in edges:
+            if graph.has_node(edge.source_node_id) and graph.has_node(edge.target_node_id):
+                graph.add_edge(edge.source_node_id, edge.target_node_id, relation=edge.relation)
+        return graph
+
+    def _find_syndromes(self, nodes: list[Node], edges: list[Edge]) -> list[Syndrome]:
+        """Ищет плотные подграфы (синдромы) через Greedy Modularity."""
+        graph = self._build_nx_graph(nodes, edges)
+        if len(graph.nodes) < 10 or len(graph.edges) < 5:
+            return []
+
+        try:
+            communities = community.greedy_modularity_communities(graph)
+        except Exception:
+            return []
+
+        syndromes: list[Syndrome] = []
+        for cluster in communities:
+            if len(cluster) < 3 or len(cluster) > 8:
+                continue
+
+            subgraph = graph.subgraph(cluster)
+            density = nx.density(subgraph)
+            if density < 0.4:
+                continue
+
+            node_names = [graph.nodes[node_id].get("name", "") for node_id in cluster]
+            centrality = nx.degree_centrality(subgraph)
+            if not centrality:
+                continue
+            core_node_id = max(centrality, key=lambda node_id: centrality[node_id])
+            core_type = graph.nodes[core_node_id].get("type", "UNKNOWN")
+
+            syndromes.append(
+                Syndrome(
+                    nodes=node_names,
+                    core_theme=core_type,
+                    score=float(density),
+                )
+            )
+
+        syndromes.sort(key=lambda item: item.score, reverse=True)
+        return syndromes
+
+    def _predict_implicit_links(self, nodes: list[Node], edges: list[Edge]) -> list[ImplicitLink]:
+        """Использует Adamic-Adar для предсказания неочевидных связей."""
+        graph = self._build_nx_graph(nodes, edges)
+        if len(graph.nodes) < 10:
+            return []
+
+        try:
+            preds = nx.adamic_adar_index(graph)
+        except Exception:
+            return []
+
+        links: list[ImplicitLink] = []
+        for source_id, target_id, probability in preds:
+            if probability < 1.5:
+                continue
+
+            source_data = graph.nodes[source_id]
+            target_data = graph.nodes[target_id]
+            types = {source_data.get("type"), target_data.get("type")}
+            if not ({"PART", "EVENT", "PROJECT"} & types) or not ({"NEED", "BELIEF"} & types):
+                continue
+
+            links.append(
+                ImplicitLink(
+                    source_name=source_data.get("name", ""),
+                    target_name=target_data.get("name", ""),
+                    source_type=source_data.get("type", ""),
+                    target_type=target_data.get("type", ""),
+                    probability_score=round(float(probability), 2),
+                    reason="много общих триггеров и эмоций",
+                )
+            )
+
+        links.sort(key=lambda item: item.probability_score, reverse=True)
+        return links[:5]
 
     async def _find_trigger_patterns(self, user_id: str, since_iso: str) -> list[TriggerPattern]:
         edges = await self.storage.get_edges_by_relation(user_id, "TRIGGERS")
