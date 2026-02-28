@@ -6,8 +6,9 @@
 
 - Приём сообщений через CLI.
 - Raw journal в SQLite (`journal_entries`).
-- Синхронный pipeline: journal → router → extractors → graph API → reply.
+- Асинхронный pipeline: journal → router → extractors → graph API → reply.
 - SELF-Graph в SQLite (`nodes`, `edges`) с upsert по `user_id + type + key`.
+- Неблокирующий доступ к SQLite через `aiosqlite`.
 - Минимальные эвристики:
   - `NOTE` создаётся всегда.
   - `TASK` по словам вроде «надо/нужно/сделать/хочу».
@@ -19,6 +20,24 @@
 
 ```bash
 python main.py
+```
+
+## LLM (OpenRouter / Qwen)
+
+По умолчанию LLM-путь включен (`SELFOS_USE_LLM=1`).
+
+Переменные окружения:
+
+```env
+OPENROUTER_API_KEY=your_openrouter_key
+OPENROUTER_MODEL_ID=qwen/qwen3.5-flash-02-23
+SELFOS_USE_LLM=1
+```
+
+Чтобы принудительно работать только на regex-экстракторах:
+
+```env
+SELFOS_USE_LLM=0
 ```
 
 ## Запуск Telegram-бота

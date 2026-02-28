@@ -41,7 +41,7 @@ def _detect_project(text: str) -> tuple[str, str] | None:
     return None
 
 
-def extract(user_id: str, text: str, intent: str, person_id: str) -> tuple[list[Node], list[Edge]]:
+async def extract(user_id: str, text: str, intent: str, person_id: str) -> tuple[list[Node], list[Edge]]:
     nodes: list[Node] = []
     edges: list[Edge] = []
 

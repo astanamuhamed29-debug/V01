@@ -1,20 +1,26 @@
 from __future__ import annotations
 
+import json
+import os
+from typing import Any
 from typing import Protocol
+
+from config import LLM_MODEL_ID
+from core.llm.prompts import SYSTEM_PROMPT_EXTRACTOR
 
 
 class LLMClient(Protocol):
-    def classify_intent(self, text: str) -> str: ...
+    async def classify_intent(self, text: str) -> str: ...
 
-    def extract_semantic(self, text: str, intent: str) -> dict: ...
+    async def extract_semantic(self, text: str, intent: str) -> dict[str, Any] | str: ...
 
-    def extract_parts(self, text: str, intent: str) -> dict: ...
+    async def extract_parts(self, text: str, intent: str) -> dict[str, Any] | str: ...
 
-    def extract_emotion(self, text: str, intent: str) -> dict: ...
+    async def extract_emotion(self, text: str, intent: str) -> dict[str, Any] | str: ...
 
 
 class MockLLMClient:
-    def classify_intent(self, text: str) -> str:
+    async def classify_intent(self, text: str) -> str:
         lowered = text.lower()
         if any(word in lowered for word in ["надо", "нужно", "сделать"]):
             return "TASK_LIKE"
@@ -24,11 +30,109 @@ class MockLLMClient:
             return "IDEA"
         return "REFLECTION"
 
-    def extract_semantic(self, text: str, intent: str) -> dict:
+    async def extract_semantic(self, text: str, intent: str) -> dict[str, Any]:
         return {"nodes": [], "edges": []}
 
-    def extract_parts(self, text: str, intent: str) -> dict:
+    async def extract_parts(self, text: str, intent: str) -> dict[str, Any]:
         return {"nodes": [], "edges": []}
 
-    def extract_emotion(self, text: str, intent: str) -> dict:
+    async def extract_emotion(self, text: str, intent: str) -> dict[str, Any]:
         return {"nodes": [], "edges": []}
+
+
+class OpenRouterQwenClient:
+    def __init__(self, *, api_key: str | None = None, model_id: str | None = None) -> None:
+        self.api_key = api_key or os.getenv("OPENROUTER_API_KEY", "")
+        self.model_id = model_id or LLM_MODEL_ID
+        self.base_url = "https://openrouter.ai/api/v1"
+
+        self._client: Any | None = None
+        self._client_init_error: str | None = None
+
+    async def classify_intent(self, text: str) -> str:
+        payload = {
+            "task": "intent_classification",
+            "intent_set": [
+                "REFLECTION",
+                "EVENT_REPORT",
+                "IDEA",
+                "TASK_LIKE",
+                "FEELING_REPORT",
+                "META",
+            ],
+            "text": text,
+        }
+        response = await self._chat_json(payload)
+        if not response:
+            return "REFLECTION"
+
+        try:
+            data = json.loads(response)
+            intent = str(data.get("intent", "REFLECTION")).upper()
+            if intent in {"REFLECTION", "EVENT_REPORT", "IDEA", "TASK_LIKE", "FEELING_REPORT", "META"}:
+                return intent
+        except json.JSONDecodeError:
+            pass
+        return "REFLECTION"
+
+    async def extract_semantic(self, text: str, intent: str) -> dict[str, Any] | str:
+        return await self._extract_by_scope(text=text, intent=intent, scope="semantic")
+
+    async def extract_parts(self, text: str, intent: str) -> dict[str, Any] | str:
+        return await self._extract_by_scope(text=text, intent=intent, scope="parts")
+
+    async def extract_emotion(self, text: str, intent: str) -> dict[str, Any] | str:
+        return await self._extract_by_scope(text=text, intent=intent, scope="emotion")
+
+    async def _extract_by_scope(self, *, text: str, intent: str, scope: str) -> dict[str, Any] | str:
+        payload = {
+            "task": "extract_graph",
+            "scope": scope,
+            "intent_hint": intent,
+            "text": text,
+        }
+        raw = await self._chat_json(payload)
+        if not raw:
+            return {"nodes": [], "edges": []}
+        return raw
+
+    async def _chat_json(self, payload: dict[str, Any]) -> str:
+        client = self._get_client()
+        if client is None:
+            return ""
+
+        try:
+            completion = await client.chat.completions.create(
+                model=self.model_id,
+                temperature=0,
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT_EXTRACTOR},
+                    {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+                ],
+            )
+        except Exception:
+            return ""
+
+        if not completion.choices:
+            return ""
+
+        content = completion.choices[0].message.content
+        return content or ""
+
+    def _get_client(self):
+        if self._client is not None:
+            return self._client
+
+        if not self.api_key:
+            self._client_init_error = "OPENROUTER_API_KEY is not set"
+            return None
+
+        try:
+            from openai import AsyncOpenAI
+        except Exception:
+            self._client_init_error = "openai package is not installed"
+            return None
+
+        self._client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
+        return self._client

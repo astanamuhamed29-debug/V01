@@ -16,15 +16,15 @@ class GraphAPI:
     def __init__(self, storage: GraphStorage) -> None:
         self.storage = storage
 
-    def ensure_person_node(self, user_id: str) -> Node:
-        return self.find_or_create_node(
+    async def ensure_person_node(self, user_id: str) -> Node:
+        return await self.find_or_create_node(
             user_id=user_id,
             node_type="PERSON",
             key="person:me",
             name="me",
         )
 
-    def create_node(
+    async def create_node(
         self,
         user_id: str,
         node_type: str,
@@ -44,9 +44,9 @@ class GraphAPI:
             key=key,
             metadata=metadata or {},
         )
-        return self.storage.upsert_node(node)
+        return await self.storage.upsert_node(node)
 
-    def find_or_create_node(
+    async def find_or_create_node(
         self,
         user_id: str,
         node_type: str,
@@ -57,10 +57,10 @@ class GraphAPI:
         subtype: str | None = None,
         metadata: dict | None = None,
     ) -> Node:
-        existing = self.storage.find_by_key(user_id, node_type, key)
+        existing = await self.storage.find_by_key(user_id, node_type, key)
         if existing:
             return existing
-        return self.create_node(
+        return await self.create_node(
             user_id=user_id,
             node_type=node_type,
             name=name,
@@ -70,7 +70,7 @@ class GraphAPI:
             metadata=metadata,
         )
 
-    def create_edge(
+    async def create_edge(
         self,
         user_id: str,
         source_node_id: str,
@@ -86,16 +86,16 @@ class GraphAPI:
             relation=relation,
             metadata=metadata or {},
         )
-        return self.storage.add_edge(edge)
+        return await self.storage.add_edge(edge)
 
-    def apply_changes(self, user_id: str, nodes: list[Node], edges: list[Edge]) -> tuple[list[Node], list[Edge]]:
+    async def apply_changes(self, user_id: str, nodes: list[Node], edges: list[Edge]) -> tuple[list[Node], list[Edge]]:
         created_nodes: list[Node] = []
         node_id_map: dict[str, str] = {}
 
         for node in nodes:
             if node.user_id != user_id:
                 continue
-            saved = self.storage.upsert_node(node)
+            saved = await self.storage.upsert_node(node)
             node_id_map[node.id] = saved.id
             created_nodes.append(saved)
 
@@ -105,7 +105,7 @@ class GraphAPI:
                 continue
             source_id = node_id_map.get(edge.source_node_id, edge.source_node_id)
             target_id = node_id_map.get(edge.target_node_id, edge.target_node_id)
-            saved = self.create_edge(
+            saved = await self.create_edge(
                 user_id=user_id,
                 source_node_id=source_id,
                 target_node_id=target_id,
@@ -116,8 +116,8 @@ class GraphAPI:
 
         return created_nodes, created_edges
 
-    def get_subgraph(self, user_id: str, node_types: list[str] | None = None) -> dict:
-        nodes = self.storage.find_nodes(user_id=user_id)
+    async def get_subgraph(self, user_id: str, node_types: list[str] | None = None) -> dict:
+        nodes = await self.storage.find_nodes(user_id=user_id)
         if node_types:
             allowed = set(node_types)
             nodes = [node for node in nodes if node.type in allowed]
@@ -125,10 +125,10 @@ class GraphAPI:
         node_ids = {node.id for node in nodes}
         edges = [
             edge
-            for edge in self.storage.list_edges(user_id)
+            for edge in await self.storage.list_edges(user_id)
             if edge.source_node_id in node_ids and edge.target_node_id in node_ids
         ]
         return {"nodes": nodes, "edges": edges}
 
-    def get_user_nodes_by_type(self, user_id: str, node_type: str) -> list[Node]:
-        return self.storage.find_nodes(user_id=user_id, node_type=node_type)
+    async def get_user_nodes_by_type(self, user_id: str, node_type: str) -> list[Node]:
+        return await self.storage.find_nodes(user_id=user_id, node_type=node_type)

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import os
 
 from aiogram import Bot, Dispatcher, F
@@ -26,19 +25,7 @@ async def run_bot() -> None:
 
     @dispatcher.message(F.text)
     async def handle_text_message(message: Message) -> None:
-        if message.from_user is None or message.text is None:
-            return
-
-        user_id = str(message.from_user.id)
-        result = await asyncio.to_thread(
-            processor.process_message,
-            user_id,
-            message.text,
-            source="telegram",
-        )
-
-        if result.reply_text:
-            await message.answer(result.reply_text)
+        await handle_incoming_message(message, processor)
 
     try:
         await dispatcher.start_polling(bot)
@@ -47,8 +34,25 @@ async def run_bot() -> None:
 
 
 def main() -> None:
+    import asyncio
+
     asyncio.run(run_bot())
 
 
 if __name__ == "__main__":
     main()
+
+
+async def handle_incoming_message(message: Message, processor) -> None:
+    if message.from_user is None or message.text is None:
+        return
+
+    user_id = str(message.from_user.id)
+    result = await processor.process_message(
+        user_id,
+        message.text,
+        source="telegram",
+    )
+
+    if result.reply_text:
+        await message.answer(result.reply_text)

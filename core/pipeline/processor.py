@@ -1,14 +1,40 @@
 from __future__ import annotations
 
+import json
+import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from uuid import uuid4
 
 from agents.reply_minimal import generate_reply
+from config import USE_LLM
 from core.graph.api import GraphAPI
 from core.graph.model import Edge, Node
 from core.journal.storage import JournalStorage
+from core.llm_client import LLMClient, MockLLMClient
 from core.pipeline import extractor_emotion, extractor_parts, extractor_semantic, router
 from core.pipeline.events import EventBus
+
+logger = logging.getLogger(__name__)
+
+ALLOWED_NODE_TYPES = {"NOTE", "PROJECT", "TASK", "BELIEF", "VALUE", "PART", "EVENT", "EMOTION", "SOMA"}
+ALLOWED_EDGE_RELATIONS = {
+    "HAS_VALUE",
+    "HOLDS_BELIEF",
+    "OWNS_PROJECT",
+    "HAS_TASK",
+    "RELATES_TO",
+    "DESCRIBES_EVENT",
+    "FEELS",
+    "EMOTION_ABOUT",
+    "EXPRESSED_AS",
+    "HAS_PART",
+    "TRIGGERED_BY",
+    "PROTECTS",
+    "CONFLICTS_WITH",
+    "SUPPORTS",
+}
 
 
 @dataclass(slots=True)
@@ -24,13 +50,17 @@ class MessageProcessor:
         self,
         graph_api: GraphAPI,
         journal: JournalStorage,
+        llm_client: LLMClient | None = None,
+        use_llm: bool | None = None,
         event_bus: EventBus | None = None,
     ) -> None:
         self.graph_api = graph_api
         self.journal = journal
+        self.llm_client = llm_client or MockLLMClient()
+        self.use_llm = USE_LLM if use_llm is None else use_llm
         self.event_bus = event_bus or EventBus()
 
-    def process_message(
+    async def process_message(
         self,
         user_id: str,
         text: str,
@@ -40,27 +70,31 @@ class MessageProcessor:
     ) -> ProcessResult:
         ts = timestamp or datetime.now(timezone.utc).isoformat()
 
-        self.journal.append(user_id=user_id, timestamp=ts, text=text, source=source)
+        await self.journal.append(user_id=user_id, timestamp=ts, text=text, source=source)
         self.event_bus.publish("journal.appended", {"user_id": user_id, "text": text})
 
         intent = router.classify(text)
+        if self.use_llm:
+            llm_intent = await self._safe_llm_intent(text)
+            if llm_intent in router.INTENTS:
+                intent = llm_intent
 
-        person = self.graph_api.ensure_person_node(user_id)
+        person = await self.graph_api.ensure_person_node(user_id)
 
-        semantic_nodes, semantic_edges = extractor_semantic.extract(user_id, text, intent, person.id)
-        parts_nodes, parts_edges = extractor_parts.extract(user_id, text, intent, person.id)
-        emotion_nodes, emotion_edges = extractor_emotion.extract(user_id, text, intent, person.id)
+        semantic_nodes, semantic_edges = await self._extract_semantic(user_id, text, intent, person.id)
+        parts_nodes, parts_edges = await self._extract_parts(user_id, text, intent, person.id)
+        emotion_nodes, emotion_edges = await self._extract_emotion(user_id, text, intent, person.id)
 
         nodes = [*semantic_nodes, *parts_nodes, *emotion_nodes]
         edges = [*semantic_edges, *parts_edges, *emotion_edges]
 
-        created_nodes, created_edges = self.graph_api.apply_changes(user_id, nodes, edges)
+        created_nodes, created_edges = await self.graph_api.apply_changes(user_id, nodes, edges)
 
-        projects = self.graph_api.get_user_nodes_by_type(user_id, "PROJECT")
+        projects = await self.graph_api.get_user_nodes_by_type(user_id, "PROJECT")
         tasks = [node for node in created_nodes if node.type == "TASK"]
         if tasks and projects:
             for task in tasks:
-                self.graph_api.create_edge(
+                await self.graph_api.create_edge(
                     user_id=user_id,
                     source_node_id=projects[0].id,
                     target_node_id=task.id,
@@ -88,7 +122,7 @@ class MessageProcessor:
 
         return ProcessResult(intent=intent, reply_text=reply_text, nodes=created_nodes, edges=created_edges)
 
-    def process(
+    async def process(
         self,
         user_id: str,
         text: str,
@@ -96,9 +130,165 @@ class MessageProcessor:
         source: str = "cli",
         timestamp: str | None = None,
     ) -> ProcessResult:
-        return self.process_message(
+        return await self.process_message(
             user_id=user_id,
             text=text,
             source=source,
             timestamp=timestamp,
         )
+
+    async def _safe_llm_intent(self, text: str) -> str | None:
+        try:
+            return await self.llm_client.classify_intent(text)
+        except Exception as exc:
+            logger.warning("LLM intent classification failed: %s", exc)
+            return None
+
+    async def _extract_semantic(self, user_id: str, text: str, intent: str, person_id: str) -> tuple[list[Node], list[Edge]]:
+        if self.use_llm:
+            try:
+                payload = await self.llm_client.extract_semantic(text, intent)
+            except Exception as exc:
+                logger.warning("LLM semantic extraction failed: %s", exc)
+                payload = {"nodes": [], "edges": []}
+            llm_nodes, llm_edges = await self._extract_via_llm(
+                user_id=user_id,
+                person_id=person_id,
+                payload=payload,
+                scope="semantic",
+            )
+            if llm_nodes or llm_edges:
+                return llm_nodes, llm_edges
+        return await extractor_semantic.extract(user_id, text, intent, person_id)
+
+    async def _extract_parts(self, user_id: str, text: str, intent: str, person_id: str) -> tuple[list[Node], list[Edge]]:
+        if self.use_llm:
+            try:
+                payload = await self.llm_client.extract_parts(text, intent)
+            except Exception as exc:
+                logger.warning("LLM parts extraction failed: %s", exc)
+                payload = {"nodes": [], "edges": []}
+            llm_nodes, llm_edges = await self._extract_via_llm(
+                user_id=user_id,
+                person_id=person_id,
+                payload=payload,
+                scope="parts",
+            )
+            if llm_nodes or llm_edges:
+                return llm_nodes, llm_edges
+        return await extractor_parts.extract(user_id, text, intent, person_id)
+
+    async def _extract_emotion(self, user_id: str, text: str, intent: str, person_id: str) -> tuple[list[Node], list[Edge]]:
+        if self.use_llm:
+            try:
+                payload = await self.llm_client.extract_emotion(text, intent)
+            except Exception as exc:
+                logger.warning("LLM emotion extraction failed: %s", exc)
+                payload = {"nodes": [], "edges": []}
+            llm_nodes, llm_edges = await self._extract_via_llm(
+                user_id=user_id,
+                person_id=person_id,
+                payload=payload,
+                scope="emotion",
+            )
+            if llm_nodes or llm_edges:
+                return llm_nodes, llm_edges
+        return await extractor_emotion.extract(user_id, text, intent, person_id)
+
+    async def _extract_via_llm(
+        self,
+        *,
+        user_id: str,
+        person_id: str,
+        payload: dict | str,
+        scope: str,
+    ) -> tuple[list[Node], list[Edge]]:
+        try:
+            parsed = self._parse_json_payload(payload)
+        except Exception as exc:
+            logger.warning("Failed to parse LLM %s payload: %s", scope, exc)
+            return [], []
+        return self._map_payload_to_graph(user_id=user_id, person_id=person_id, data=parsed)
+
+    def _parse_json_payload(self, payload: dict | str) -> dict:
+        if isinstance(payload, dict):
+            return payload
+
+        cleaned = payload.strip()
+        fenced = re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned, flags=re.IGNORECASE | re.DOTALL)
+        if fenced:
+            cleaned = fenced.group(1).strip()
+
+        return json.loads(cleaned)
+
+    def _map_payload_to_graph(self, *, user_id: str, person_id: str, data: dict) -> tuple[list[Node], list[Edge]]:
+        raw_nodes = data.get("nodes", [])
+        raw_edges = data.get("edges", [])
+        if not isinstance(raw_nodes, list) or not isinstance(raw_edges, list):
+            return [], []
+
+        nodes: list[Node] = []
+        edges: list[Edge] = []
+        ref_map: dict[str, str] = {
+            "person:me": person_id,
+            "me": person_id,
+            "person": person_id,
+        }
+
+        for raw_node in raw_nodes:
+            if not isinstance(raw_node, dict):
+                continue
+            node_type = str(raw_node.get("type", "")).upper()
+            if node_type not in ALLOWED_NODE_TYPES:
+                continue
+
+            temp_id = str(raw_node.get("id") or f"tmp:{uuid4()}")
+            node_id = str(raw_node.get("persistent_id") or uuid4())
+            metadata = raw_node.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = {}
+
+            node = Node(
+                id=node_id,
+                user_id=user_id,
+                type=node_type,
+                name=raw_node.get("name"),
+                text=raw_node.get("text"),
+                subtype=raw_node.get("subtype"),
+                key=raw_node.get("key"),
+                metadata=metadata,
+            )
+            nodes.append(node)
+            ref_map[temp_id] = node.id
+
+        for raw_edge in raw_edges:
+            if not isinstance(raw_edge, dict):
+                continue
+
+            relation = str(raw_edge.get("relation", "")).upper()
+            if relation not in ALLOWED_EDGE_RELATIONS:
+                continue
+
+            source_ref = str(raw_edge.get("source_node_id") or raw_edge.get("source") or "")
+            target_ref = str(raw_edge.get("target_node_id") or raw_edge.get("target") or "")
+            if not source_ref or not target_ref:
+                continue
+
+            source_id = ref_map.get(source_ref, source_ref)
+            target_id = ref_map.get(target_ref, target_ref)
+
+            metadata = raw_edge.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = {}
+
+            edges.append(
+                Edge(
+                    user_id=user_id,
+                    source_node_id=source_id,
+                    target_node_id=target_id,
+                    relation=relation,
+                    metadata=metadata,
+                )
+            )
+
+        return nodes, edges

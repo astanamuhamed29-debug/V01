@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-import sqlite3
+import asyncio
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
+
+import aiosqlite
 
 
 @dataclass(slots=True)
@@ -18,16 +21,25 @@ class JournalStorage:
     def __init__(self, db_path: str | Path = "data/self_os.db") -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_schema()
+        self._initialized = False
+        self._init_lock = asyncio.Lock()
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+    @asynccontextmanager
+    async def _connect(self):
+        async with aiosqlite.connect(str(self.db_path)) as conn:
+            conn.row_factory = aiosqlite.Row
+            yield conn
 
-    def _init_schema(self) -> None:
-        with self._connect() as conn:
-            conn.execute(
+    async def _ensure_initialized(self) -> None:
+        if self._initialized:
+            return
+
+        async with self._init_lock:
+            if self._initialized:
+                return
+
+            async with self._connect() as conn:
+                await conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS journal_entries (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -38,22 +50,29 @@ class JournalStorage:
                 )
                 """
             )
+                await conn.commit()
+            self._initialized = True
 
-    def append(self, user_id: str, timestamp: str, text: str, source: str) -> JournalEntry:
-        with self._connect() as conn:
-            cursor = conn.execute(
+    async def append(self, user_id: str, timestamp: str, text: str, source: str) -> JournalEntry:
+        await self._ensure_initialized()
+
+        async with self._connect() as conn:
+            cursor = await conn.execute(
                 """
                 INSERT INTO journal_entries (user_id, timestamp, text, source)
                 VALUES (?, ?, ?, ?)
                 """,
                 (user_id, timestamp, text, source),
             )
+            await conn.commit()
             entry_id = int(cursor.lastrowid)
         return JournalEntry(id=entry_id, user_id=user_id, timestamp=timestamp, text=text, source=source)
 
-    def list_entries(self, user_id: str, limit: int = 100) -> list[JournalEntry]:
-        with self._connect() as conn:
-            rows = conn.execute(
+    async def list_entries(self, user_id: str, limit: int = 100) -> list[JournalEntry]:
+        await self._ensure_initialized()
+
+        async with self._connect() as conn:
+            cursor = await conn.execute(
                 """
                 SELECT * FROM journal_entries
                 WHERE user_id = ?
@@ -61,7 +80,8 @@ class JournalStorage:
                 LIMIT ?
                 """,
                 (user_id, limit),
-            ).fetchall()
+            )
+            rows = await cursor.fetchall()
         return [
             JournalEntry(
                 id=row["id"],

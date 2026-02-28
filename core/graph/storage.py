@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import json
-import sqlite3
+from contextlib import asynccontextmanager
 from pathlib import Path
+
+import aiosqlite
 
 from core.graph.model import Edge, Node
 
@@ -11,16 +14,25 @@ class GraphStorage:
     def __init__(self, db_path: str | Path = "data/self_os.db") -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_schema()
+        self._initialized = False
+        self._init_lock = asyncio.Lock()
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+    @asynccontextmanager
+    async def _connect(self):
+        async with aiosqlite.connect(str(self.db_path)) as conn:
+            conn.row_factory = aiosqlite.Row
+            yield conn
 
-    def _init_schema(self) -> None:
-        with self._connect() as conn:
-            conn.executescript(
+    async def _ensure_initialized(self) -> None:
+        if self._initialized:
+            return
+
+        async with self._init_lock:
+            if self._initialized:
+                return
+
+            async with self._connect() as conn:
+                await conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS nodes (
                     id TEXT PRIMARY KEY,
@@ -57,19 +69,24 @@ class GraphStorage:
                     ON edges(user_id, source_node_id, target_node_id, relation);
                 """
             )
+                await conn.commit()
+            self._initialized = True
 
-    def upsert_node(self, node: Node) -> Node:
-        with self._connect() as conn:
+    async def upsert_node(self, node: Node) -> Node:
+        await self._ensure_initialized()
+
+        async with self._connect() as conn:
             if node.key:
-                existing = conn.execute(
+                cursor = await conn.execute(
                     """
                     SELECT * FROM nodes
                     WHERE user_id = ? AND type = ? AND key = ?
                     """,
                     (node.user_id, node.type, node.key),
-                ).fetchone()
+                )
+                existing = await cursor.fetchone()
                 if existing:
-                    conn.execute(
+                    await conn.execute(
                         """
                         UPDATE nodes
                         SET name = COALESCE(?, name),
@@ -86,9 +103,10 @@ class GraphStorage:
                             existing["id"],
                         ),
                     )
-                    return self.get_node(existing["id"])
+                    await conn.commit()
+                    return await self.get_node(existing["id"])
 
-            conn.execute(
+            await conn.execute(
                 """
                 INSERT INTO nodes (id, user_id, type, name, text, subtype, key, metadata_json, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -105,21 +123,25 @@ class GraphStorage:
                     node.created_at,
                 ),
             )
+            await conn.commit()
             return node
 
-    def add_edge(self, edge: Edge) -> Edge:
-        with self._connect() as conn:
-            existing = conn.execute(
+    async def add_edge(self, edge: Edge) -> Edge:
+        await self._ensure_initialized()
+
+        async with self._connect() as conn:
+            cursor = await conn.execute(
                 """
                 SELECT id FROM edges
                 WHERE user_id = ? AND source_node_id = ? AND target_node_id = ? AND relation = ?
                 """,
                 (edge.user_id, edge.source_node_id, edge.target_node_id, edge.relation),
-            ).fetchone()
+            )
+            existing = await cursor.fetchone()
             if existing:
-                return self.get_edge(existing["id"])
+                return await self.get_edge(existing["id"])
 
-            conn.execute(
+            await conn.execute(
                 """
                 INSERT INTO edges (id, user_id, source_node_id, target_node_id, relation, metadata_json, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -134,28 +156,37 @@ class GraphStorage:
                     edge.created_at,
                 ),
             )
+            await conn.commit()
             return edge
 
-    def get_node(self, node_id: str) -> Node:
-        with self._connect() as conn:
-            row = conn.execute("SELECT * FROM nodes WHERE id = ?", (node_id,)).fetchone()
+    async def get_node(self, node_id: str) -> Node:
+        await self._ensure_initialized()
+
+        async with self._connect() as conn:
+            cursor = await conn.execute("SELECT * FROM nodes WHERE id = ?", (node_id,))
+            row = await cursor.fetchone()
         if row is None:
             raise KeyError(f"Node not found: {node_id}")
         return _row_to_node(row)
 
-    def get_edge(self, edge_id: str) -> Edge:
-        with self._connect() as conn:
-            row = conn.execute("SELECT * FROM edges WHERE id = ?", (edge_id,)).fetchone()
+    async def get_edge(self, edge_id: str) -> Edge:
+        await self._ensure_initialized()
+
+        async with self._connect() as conn:
+            cursor = await conn.execute("SELECT * FROM edges WHERE id = ?", (edge_id,))
+            row = await cursor.fetchone()
         if row is None:
             raise KeyError(f"Edge not found: {edge_id}")
         return _row_to_edge(row)
 
-    def find_nodes(
+    async def find_nodes(
         self,
         user_id: str,
         node_type: str | None = None,
         name: str | None = None,
     ) -> list[Node]:
+        await self._ensure_initialized()
+
         query = "SELECT * FROM nodes WHERE user_id = ?"
         params: list[str] = [user_id]
         if node_type:
@@ -166,28 +197,35 @@ class GraphStorage:
             params.append(name)
         query += " ORDER BY created_at"
 
-        with self._connect() as conn:
-            rows = conn.execute(query, params).fetchall()
+        async with self._connect() as conn:
+            cursor = await conn.execute(query, params)
+            rows = await cursor.fetchall()
         return [_row_to_node(row) for row in rows]
 
-    def find_by_key(self, user_id: str, node_type: str, key: str) -> Node | None:
-        with self._connect() as conn:
-            row = conn.execute(
+    async def find_by_key(self, user_id: str, node_type: str, key: str) -> Node | None:
+        await self._ensure_initialized()
+
+        async with self._connect() as conn:
+            cursor = await conn.execute(
                 "SELECT * FROM nodes WHERE user_id = ? AND type = ? AND key = ?",
                 (user_id, node_type, key),
-            ).fetchone()
+            )
+            row = await cursor.fetchone()
         return _row_to_node(row) if row else None
 
-    def list_edges(self, user_id: str) -> list[Edge]:
-        with self._connect() as conn:
-            rows = conn.execute(
+    async def list_edges(self, user_id: str) -> list[Edge]:
+        await self._ensure_initialized()
+
+        async with self._connect() as conn:
+            cursor = await conn.execute(
                 "SELECT * FROM edges WHERE user_id = ? ORDER BY created_at",
                 (user_id,),
-            ).fetchall()
+            )
+            rows = await cursor.fetchall()
         return [_row_to_edge(row) for row in rows]
 
 
-def _row_to_node(row: sqlite3.Row) -> Node:
+def _row_to_node(row: aiosqlite.Row) -> Node:
     return Node(
         id=row["id"],
         user_id=row["user_id"],
@@ -201,7 +239,7 @@ def _row_to_node(row: sqlite3.Row) -> Node:
     )
 
 
-def _row_to_edge(row: sqlite3.Row) -> Edge:
+def _row_to_edge(row: aiosqlite.Row) -> Edge:
     return Edge(
         id=row["id"],
         user_id=row["user_id"],
