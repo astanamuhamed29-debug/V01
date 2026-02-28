@@ -17,13 +17,16 @@ class GraphContextBuilder:
         Собирает контекст из графа для использования в generate_reply.
         Возвращает словарь с историческими паттернами пользователя.
         """
-        all_nodes = await self.storage.find_nodes(user_id=user_id)
+        projects_raw = await self.storage.find_nodes(user_id, node_type="PROJECT", limit=10)
+        emotions_raw = await self.storage.find_nodes(user_id, node_type="EMOTION", limit=50)
+        parts_raw = await self.storage.find_nodes(user_id, node_type="PART", limit=20)
+        values_raw = await self.storage.find_nodes(user_id, node_type="VALUE", limit=20)
+        beliefs_raw = await self.storage.find_nodes(user_id, node_type="BELIEF", limit=10)
+        notes_raw = await self.storage.find_nodes(user_id, node_type="NOTE", limit=5)
 
-        projects = [n for n in all_nodes if n.type == "PROJECT"]
-        active_projects = [n.name for n in projects if n.name]
+        active_projects = [n.name for n in projects_raw if n.name]
 
-        emotions = [n for n in all_nodes if n.type == "EMOTION"]
-        emotion_labels = [n.metadata.get("label", "") for n in emotions if n.metadata.get("label")]
+        emotion_labels = [n.metadata.get("label", "") for n in emotions_raw if n.metadata.get("label")]
         emotion_counts = Counter(emotion_labels)
         recurring_emotions = [
             {"label": label, "count": count}
@@ -31,7 +34,6 @@ class GraphContextBuilder:
             if count >= 2
         ]
 
-        parts = [n for n in all_nodes if n.type == "PART"]
         known_parts = [
             {
                 "name": n.name or n.subtype or "",
@@ -41,28 +43,32 @@ class GraphContextBuilder:
                 "last_seen": n.metadata.get("last_seen") or n.created_at,
                 "voice": n.metadata.get("voice", ""),
             }
-            for n in parts
+            for n in parts_raw
         ]
         known_parts.sort(key=lambda p: p["appearances"], reverse=True)
 
-        value_nodes = [n for n in all_nodes if n.type == "VALUE"]
         known_values = [
             {
                 "name": n.name or "",
                 "key": n.key or "",
                 "count": int(n.metadata.get("appearances", 1)),
             }
-            for n in value_nodes
+            for n in values_raw
         ]
 
-        beliefs = [n for n in all_nodes if n.type == "BELIEF"]
-        belief_texts = [n.text or n.name or "" for n in beliefs if n.text or n.name]
+        belief_texts = [n.text or n.name or "" for n in beliefs_raw if n.text or n.name]
 
         snapshots = await self.storage.get_mood_snapshots(user_id, limit=5)
         mood_trend = self._calc_trend(snapshots)
 
-        notes = [n for n in all_nodes if n.type == "NOTE"]
-        total_messages = len(notes) or len(all_nodes) // 3
+        total_messages = len(notes_raw)
+        total_known = (
+            len(projects_raw)
+            + len(parts_raw)
+            + len(values_raw)
+            + len(emotions_raw)
+            + len(beliefs_raw)
+        )
 
         context = {
             "active_projects": active_projects,
@@ -72,7 +78,7 @@ class GraphContextBuilder:
             "recurring_beliefs": belief_texts[:3],
             "mood_trend": mood_trend,
             "total_messages": total_messages,
-            "has_history": len(all_nodes) > 5,
+            "has_history": total_known > 5,
         }
         logger.debug(
             "GraphContext built: projects=%d parts=%d emotions=%d",

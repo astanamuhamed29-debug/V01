@@ -187,6 +187,74 @@ class GraphStorage:
             created_at=created_at,
         )
 
+    async def upsert_nodes_batch(self, nodes_data: list[tuple[Node, dict]]) -> list[Node]:
+        """
+        Атомарный апсерт списка узлов в одной транзакции.
+        nodes_data: [(node, metadata_dict), ...]
+        Возвращает сохранённые узлы в том же порядке.
+        """
+        await self._ensure_initialized()
+        conn = await self._get_conn()
+        saved: list[Node] = []
+
+        await conn.execute("BEGIN")
+        try:
+            for node, node_metadata in nodes_data:
+                if node.key:
+                    cursor = await conn.execute(
+                        "SELECT id, created_at FROM nodes "
+                        "WHERE user_id = ? AND type = ? AND key = ?",
+                        (node.user_id, node.type, node.key),
+                    )
+                    existing = await cursor.fetchone()
+                    canonical_id = existing["id"] if existing else node.id
+                    created_at = existing["created_at"] if existing else node.created_at
+                else:
+                    cursor = await conn.execute(
+                        "SELECT created_at FROM nodes WHERE id = ?", (node.id,)
+                    )
+                    existing = await cursor.fetchone()
+                    canonical_id = node.id
+                    created_at = existing["created_at"] if existing else node.created_at
+
+                await conn.execute(
+                    """
+                    INSERT OR REPLACE INTO nodes
+                      (id, user_id, type, name, text, subtype, key, metadata_json, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        canonical_id,
+                        node.user_id,
+                        node.type,
+                        node.name,
+                        node.text,
+                        node.subtype,
+                        node.key,
+                        json.dumps(node_metadata, ensure_ascii=False),
+                        created_at,
+                    ),
+                )
+                saved.append(
+                    Node(
+                        id=canonical_id,
+                        user_id=node.user_id,
+                        type=node.type,
+                        name=node.name,
+                        text=node.text,
+                        subtype=node.subtype,
+                        key=node.key,
+                        metadata=node_metadata,
+                        created_at=created_at,
+                    )
+                )
+            await conn.commit()
+        except Exception:
+            await conn.rollback()
+            raise
+
+        return saved
+
     async def save_mood_snapshot(self, snapshot: dict) -> None:
         await self._ensure_initialized()
 

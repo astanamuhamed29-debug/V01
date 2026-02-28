@@ -25,12 +25,12 @@ def test_graph_api_creates_nodes_and_edges(tmp_path):
 
             projects = await api.get_user_nodes_by_type("me", "PROJECT")
             tasks = await api.get_user_nodes_by_type("me", "TASK")
-            subgraph = await api.get_subgraph("me", ["PERSON", "PROJECT", "TASK"])
+            edges = await api.storage.list_edges("me")
 
             assert len(projects) == 1
             assert projects[0].name == "SELF-OS"
             assert len(tasks) == 1
-            assert len(subgraph["edges"]) >= 2
+            assert len(edges) >= 2
         finally:
             await api.storage.close()
 
@@ -81,10 +81,10 @@ def test_apply_changes_dedups_nodes_by_key_and_edges(tmp_path):
             assert projects[0].metadata.get("source") == "second"
             assert projects[0].metadata.get("updated") is True
 
-            subgraph = await api.get_subgraph("me", ["PERSON", "PROJECT"])
+            all_edges = await api.storage.list_edges("me")
             own_edges = [
                 edge
-                for edge in subgraph["edges"]
+                for edge in all_edges
                 if edge.relation == "OWNS_PROJECT" and edge.source_node_id == person.id and edge.target_node_id == projects[0].id
             ]
             assert len(own_edges) == 1
@@ -163,10 +163,10 @@ def test_edge_dedup(tmp_path):
         )
             await api.apply_changes("me", [project_again], [edge_again])
 
-            subgraph = await api.get_subgraph("me", ["PERSON", "PROJECT"])
+            all_edges = await api.storage.list_edges("me")
             own_edges = [
                 item
-                for item in subgraph["edges"]
+                for item in all_edges
                 if item.source_node_id == person.id and item.relation == "OWNS_PROJECT"
             ]
             assert len(own_edges) == 1

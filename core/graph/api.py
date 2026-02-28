@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 
 from core.graph.model import Edge, Node
@@ -78,26 +79,35 @@ class GraphAPI:
         relation: str,
         *,
         metadata: dict | None = None,
-    ) -> Edge:
-        edge = Edge(
-            user_id=user_id,
-            source_node_id=source_node_id,
-            target_node_id=target_node_id,
-            relation=relation,
-            metadata=metadata or {},
-        )
-        return await self.storage.add_edge(edge)
+    ) -> Edge | None:
+        try:
+            edge = Edge(
+                user_id=user_id,
+                source_node_id=source_node_id,
+                target_node_id=target_node_id,
+                relation=relation,
+                metadata=metadata or {},
+            )
+            return await self.storage.add_edge(edge)
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "create_edge failed %s→%s [%s]: %s",
+                source_node_id,
+                target_node_id,
+                relation,
+                exc,
+            )
+            return None
 
     async def apply_changes(self, user_id: str, nodes: list[Node], edges: list[Edge]) -> tuple[list[Node], list[Edge]]:
-        created_nodes_by_id: dict[str, Node] = {}
         node_id_map: dict[str, str] = {}
+        nodes_data: list[tuple[str, Node, dict]] = []
 
         for node in nodes:
             if node.user_id != user_id:
                 continue
 
             original_id = node.id
-            candidate = node
 
             if node.key:
                 node = Node(
@@ -111,12 +121,11 @@ class GraphAPI:
                     metadata=node.metadata,
                     created_at=node.created_at,
                 )
-                candidate = node
 
             if node.key:
                 existing = await self.storage.find_by_key(user_id, node.type, node.key)
                 if existing:
-                    candidate = Node(
+                    node = Node(
                         id=existing.id,
                         user_id=user_id,
                         type=node.type,
@@ -128,7 +137,22 @@ class GraphAPI:
                         created_at=existing.created_at,
                     )
 
-            saved = await self.storage.upsert_node(candidate)
+            node_metadata = dict(node.metadata)
+            if node.type == "EMOTION" and "created_at" not in node_metadata:
+                from datetime import datetime, timezone
+
+                node_metadata["created_at"] = datetime.now(timezone.utc).isoformat()
+
+            nodes_data.append((original_id, node, node_metadata))
+
+        saved_nodes = (
+            await self.storage.upsert_nodes_batch([(node, metadata) for _, node, metadata in nodes_data])
+            if nodes_data
+            else []
+        )
+
+        created_nodes_by_id: dict[str, Node] = {}
+        for (original_id, _, _), saved in zip(nodes_data, saved_nodes):
             node_id_map[original_id] = saved.id
             node_id_map[saved.id] = saved.id
             created_nodes_by_id[saved.id] = saved
@@ -148,23 +172,10 @@ class GraphAPI:
                 relation=edge.relation,
                 metadata=edge.metadata,
             )
-            created_edges.append(saved)
+            if saved:
+                created_edges.append(saved)
 
         return created_nodes, created_edges
-
-    async def get_subgraph(self, user_id: str, node_types: list[str] | None = None) -> dict:
-        nodes = await self.storage.find_nodes(user_id=user_id)
-        if node_types:
-            allowed = set(node_types)
-            nodes = [node for node in nodes if node.type in allowed]
-
-        node_ids = {node.id for node in nodes}
-        edges = [
-            edge
-            for edge in await self.storage.list_edges(user_id)
-            if edge.source_node_id in node_ids and edge.target_node_id in node_ids
-        ]
-        return {"nodes": nodes, "edges": edges}
 
     async def get_user_nodes_by_type(self, user_id: str, node_type: str) -> list[Node]:
         return await self.storage.find_nodes(user_id=user_id, node_type=node_type)

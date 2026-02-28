@@ -5,7 +5,7 @@ from core.graph.model import Node
 from core.graph.storage import GraphStorage
 
 
-def test_build_empty(tmp_path):
+def test_build_empty_graph(tmp_path):
     async def scenario() -> None:
         storage = GraphStorage(db_path=tmp_path / "test.db")
         builder = GraphContextBuilder(storage)
@@ -14,6 +14,7 @@ def test_build_empty(tmp_path):
             context = await builder.build("u_empty")
 
             assert context["has_history"] is False
+            assert context["total_messages"] == 0
             assert context["active_projects"] == []
             assert context["recurring_emotions"] == []
             assert context["known_parts"] == []
@@ -146,12 +147,17 @@ def test_build_with_parts(tmp_path):
                 metadata={"appearances": 2, "voice": "Я тушу напряжение."},
             )
             )
+            await storage.upsert_node(Node(user_id="u3", type="PROJECT", key="project:self-os", name="SELF-OS"))
+            await storage.upsert_node(Node(user_id="u3", type="VALUE", key="value:freedom", name="Свобода"))
+            await storage.upsert_node(Node(user_id="u3", type="BELIEF", text="Я справлюсь"))
+            await storage.upsert_node(Node(user_id="u3", type="EMOTION", metadata={"label": "тревога"}))
 
             context = await builder.build("u3")
 
-            assert context["known_parts"]
+            assert len(context["known_parts"]) == 2
             assert context["known_parts"][0]["key"] == "part:critic"
             assert context["known_parts"][0]["appearances"] >= context["known_parts"][1]["appearances"]
+            assert context["has_history"] is True
         finally:
             await storage.close()
 

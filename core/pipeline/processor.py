@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import re
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
-from uuid import uuid4
+from datetime import datetime, timedelta, timezone
 
 from agents.reply_minimal import generate_reply
 from config import USE_LLM
@@ -16,30 +14,19 @@ from core.graph.api import GraphAPI
 from core.graph.model import Edge, Node
 from core.journal.storage import JournalStorage
 from core.llm_client import LLMClient, MockLLMClient
+from core.llm.parser import (
+    ALLOWED_EDGE_RELATIONS,
+    ALLOWED_NODE_TYPES,
+    is_minimal_payload,
+    map_payload_to_graph,
+    parse_json_payload,
+)
 from core.mood.tracker import MoodTracker
 from core.parts.memory import PartsMemory
 from core.pipeline import extractor_emotion, extractor_parts, extractor_semantic, router
 from core.pipeline.events import EventBus
 
 logger = logging.getLogger(__name__)
-
-ALLOWED_NODE_TYPES = {"NOTE", "PROJECT", "TASK", "BELIEF", "VALUE", "PART", "EVENT", "EMOTION", "SOMA"}
-ALLOWED_EDGE_RELATIONS = {
-    "HAS_VALUE",
-    "HOLDS_BELIEF",
-    "OWNS_PROJECT",
-    "HAS_TASK",
-    "RELATES_TO",
-    "DESCRIBES_EVENT",
-    "FEELS",
-    "EMOTION_ABOUT",
-    "EXPRESSED_AS",
-    "HAS_PART",
-    "TRIGGERED_BY",
-    "PROTECTS",
-    "CONFLICTS_WITH",
-    "SUPPORTS",
-}
 
 # Конфигурируемые правила валидации LLM-ответа
 # Формат: (regex_pattern_or_None, required_node_type, required_key_or_None, error_msg)
@@ -132,23 +119,27 @@ class MessageProcessor:
         current_projects = [node for node in created_nodes if node.type == "PROJECT"]
         if tasks and current_projects:
             for task in tasks:
-                await self.graph_api.create_edge(
+                edge = await self.graph_api.create_edge(
                     user_id=user_id,
                     source_node_id=current_projects[0].id,
                     target_node_id=task.id,
                     relation="HAS_TASK",
                 )
+                if edge:
+                    created_edges.append(edge)
         elif tasks and not current_projects:
             all_projects = await self.graph_api.get_user_nodes_by_type(user_id, "PROJECT")
             all_projects_sorted = sorted(all_projects, key=lambda node: node.created_at or "", reverse=True)
             if all_projects_sorted:
                 for task in tasks:
-                    await self.graph_api.create_edge(
+                    edge = await self.graph_api.create_edge(
                         user_id=user_id,
                         source_node_id=all_projects_sorted[0].id,
                         target_node_id=task.id,
                         relation="HAS_TASK",
                     )
+                    if edge:
+                        created_edges.append(edge)
 
         part_nodes = [node for node in created_nodes if node.type == "PART"]
         value_nodes = [node for node in created_nodes if node.type == "VALUE"]
@@ -168,8 +159,9 @@ class MessageProcessor:
                         relation="CONFLICTS_WITH",
                         metadata={"auto": "session_part_value_conflict"},
                     )
-                    created_edges.append(conflict_edge)
-                    graph_context["session_conflict"] = True
+                    if conflict_edge:
+                        created_edges.append(conflict_edge)
+                        graph_context["session_conflict"] = True
 
         emotion_nodes = [node for node in created_nodes if node.type == "EMOTION"]
         mood_context = await self.mood_tracker.update(user_id, emotion_nodes)
@@ -306,11 +298,11 @@ class MessageProcessor:
                 logger.info("LLM extract_all call")
                 payload = await self.llm_client.extract_all(text, "UNKNOWN", graph_hints=graph_hints)
                 logger.info("LLM raw response: %s", repr(payload))
-                if self._is_minimal_payload(payload):
+                if is_minimal_payload(payload):
                     logger.warning("LLM returned minimal/empty payload, using fallback")
                     raise ValueError("minimal payload")
-                parsed = self._parse_json_payload(payload)
-                llm_nodes, llm_edges = self._map_payload_to_graph(user_id=user_id, person_id=person_id, data=parsed)
+                parsed = parse_json_payload(payload)
+                llm_nodes, llm_edges = map_payload_to_graph(user_id=user_id, person_id=person_id, data=parsed)
                 logger.info("LLM mapped: nodes=%d edges=%d", len(llm_nodes), len(llm_edges))
                 if llm_nodes or llm_edges:
                     base_intent = router.classify(text)
@@ -374,112 +366,3 @@ class MessageProcessor:
         except Exception as exc:
             logger.warning("live_reply_safe failed: %s", exc)
             return ""
-
-    def _is_minimal_payload(self, payload: dict | str) -> bool:
-        if not payload:
-            return True
-        if isinstance(payload, str):
-            compact = payload.strip()
-            return compact in {'{"intent": "REFLECTION"}', '{"intent":"REFLECTION"}'}
-        if isinstance(payload, dict):
-            intent = str(payload.get("intent", "")).upper()
-            nodes = payload.get("nodes")
-            edges = payload.get("edges")
-            if intent == "REFLECTION" and nodes in (None, []) and edges in (None, []):
-                return True
-        return False
-
-    def _parse_json_payload(self, payload: dict | str) -> dict:
-        if isinstance(payload, dict):
-            return payload
-
-        cleaned = payload.strip()
-        fenced = re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned, flags=re.IGNORECASE | re.DOTALL)
-        if fenced:
-            cleaned = fenced.group(1).strip()
-
-        if "</think>" in cleaned:
-            cleaned = cleaned.split("</think>", 1)[1].strip()
-
-        first_brace = cleaned.find("{")
-        last_brace = cleaned.rfind("}")
-        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-            cleaned = cleaned[first_brace:last_brace + 1]
-
-        return json.loads(cleaned)
-
-    def _map_payload_to_graph(self, *, user_id: str, person_id: str, data: dict) -> tuple[list[Node], list[Edge]]:
-        raw_nodes = data.get("nodes", [])
-        raw_edges = data.get("edges", [])
-        if not isinstance(raw_nodes, list) or not isinstance(raw_edges, list):
-            return [], []
-
-        nodes: list[Node] = []
-        edges: list[Edge] = []
-        ref_map: dict[str, str] = {
-            "person:me": person_id,
-            "me": person_id,
-            "person": person_id,
-        }
-
-        for raw_node in raw_nodes:
-            if not isinstance(raw_node, dict):
-                continue
-            node_type = str(raw_node.get("type", "")).upper()
-            if node_type not in ALLOWED_NODE_TYPES:
-                continue
-
-            temp_id = str(raw_node.get("id") or f"tmp:{uuid4()}")
-            node_id = str(raw_node.get("persistent_id") or uuid4())
-            metadata = raw_node.get("metadata")
-            if not isinstance(metadata, dict):
-                metadata = {}
-
-            node = Node(
-                id=node_id,
-                user_id=user_id,
-                type=node_type,
-                name=raw_node.get("name"),
-                text=raw_node.get("text"),
-                subtype=raw_node.get("subtype"),
-                key=raw_node.get("key"),
-                metadata=metadata,
-            )
-            if node.type == "EMOTION" and not node.key:
-                label = str(node.metadata.get("label", "unknown"))
-                today = date.today().isoformat()
-                node.key = f"emotion:{label}:{today}"
-            nodes.append(node)
-            ref_map[temp_id] = node.id
-
-        for raw_edge in raw_edges:
-            if not isinstance(raw_edge, dict):
-                continue
-
-            relation = str(raw_edge.get("relation", "")).upper()
-            if relation not in ALLOWED_EDGE_RELATIONS:
-                continue
-
-            source_ref = str(raw_edge.get("source_node_id") or raw_edge.get("source") or "")
-            target_ref = str(raw_edge.get("target_node_id") or raw_edge.get("target") or "")
-            if not source_ref or not target_ref:
-                continue
-
-            source_id = ref_map.get(source_ref, source_ref)
-            target_id = ref_map.get(target_ref, target_ref)
-
-            metadata = raw_edge.get("metadata")
-            if not isinstance(metadata, dict):
-                metadata = {}
-
-            edges.append(
-                Edge(
-                    user_id=user_id,
-                    source_node_id=source_id,
-                    target_node_id=target_id,
-                    relation=relation,
-                    metadata=metadata,
-                )
-            )
-
-        return nodes, edges
