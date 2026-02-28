@@ -45,6 +45,16 @@ class GraphContextBuilder:
         ]
         known_parts.sort(key=lambda p: p["appearances"], reverse=True)
 
+        value_nodes = [n for n in all_nodes if n.type == "VALUE"]
+        known_values = [
+            {
+                "name": n.name or "",
+                "key": n.key or "",
+                "count": int(n.metadata.get("appearances", 1)),
+            }
+            for n in value_nodes
+        ]
+
         beliefs = [n for n in all_nodes if n.type == "BELIEF"]
         belief_texts = [n.text or n.name or "" for n in beliefs if n.text or n.name]
 
@@ -58,6 +68,7 @@ class GraphContextBuilder:
             "active_projects": active_projects,
             "recurring_emotions": recurring_emotions,
             "known_parts": known_parts,
+            "known_values": known_values,
             "recurring_beliefs": belief_texts[:3],
             "mood_trend": mood_trend,
             "total_messages": total_messages,

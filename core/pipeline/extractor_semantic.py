@@ -41,6 +41,16 @@ def _detect_project(text: str) -> tuple[str, str] | None:
     return None
 
 
+def _detect_value(lowered: str) -> tuple[str, str] | None:
+    if re.search(r"в\s+ч[её]м(?:\s+\w+){0,3}\s+польза", lowered, flags=re.IGNORECASE):
+        return "польза", "в чем твоя польза"
+    if re.search(r"\b(зачем|какой\s+смысл|в\s+ч[её]м(?:\s+\w+){0,3}\s+смысл|что\s+это\s+(?:мне\s+)?да[её]т)\b", lowered, flags=re.IGNORECASE):
+        return "смысл", "какой в этом смысл"
+    if re.search(r"\b(более\s+жив\w*|живым|важно\s+чтобы\s+было\s+жив\w*)\b", lowered, flags=re.IGNORECASE):
+        return "аутентичность", "хочу сделать вывод более живым"
+    return None
+
+
 async def extract(user_id: str, text: str, intent: str, person_id: str) -> tuple[list[Node], list[Edge]]:
     nodes: list[Node] = []
     edges: list[Edge] = []
@@ -122,6 +132,35 @@ async def extract(user_id: str, text: str, intent: str, person_id: str) -> tuple
                 user_id=user_id,
                 source_node_id=note.id,
                 target_node_id=belief.id,
+                relation="RELATES_TO",
+            )
+        )
+
+    lowered = text.lower()
+    value_detected = _detect_value(lowered)
+    if value_detected:
+        value_name, value_text = value_detected
+        value = Node(
+            user_id=user_id,
+            type="VALUE",
+            name=value_name,
+            text=value_text,
+            key=f"value:{normalize_key(value_name)}",
+        )
+        nodes.append(value)
+        edges.append(
+            Edge(
+                user_id=user_id,
+                source_node_id=person_id,
+                target_node_id=value.id,
+                relation="HAS_VALUE",
+            )
+        )
+        edges.append(
+            Edge(
+                user_id=user_id,
+                source_node_id=note.id,
+                target_node_id=value.id,
                 relation="RELATES_TO",
             )
         )

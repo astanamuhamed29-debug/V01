@@ -11,3 +11,11 @@ def test_router_classifies_feeling_report():
 
 def test_router_classifies_meta():
     assert classify("Какие есть команды?") == "META"
+
+
+def test_meta_intent():
+    assert classify("в чем польза") == "META"
+
+
+def test_meta_intent_2():
+    assert classify("зачем это всё") == "META"

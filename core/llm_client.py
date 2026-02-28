@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class LLMClient(Protocol):
     async def classify_intent(self, text: str) -> str: ...
 
-    async def extract_all(self, text: str, intent: str) -> dict[str, Any] | str: ...
+    async def extract_all(self, text: str, intent: str, graph_hints: dict | None = None) -> dict[str, Any] | str: ...
 
     async def extract_semantic(self, text: str, intent: str) -> dict[str, Any] | str: ...
 
@@ -39,7 +39,7 @@ class MockLLMClient:
             return "IDEA"
         return "REFLECTION"
 
-    async def extract_all(self, text: str, intent: str) -> dict[str, Any]:
+    async def extract_all(self, text: str, intent: str, graph_hints: dict | None = None) -> dict[str, Any]:
         return {"nodes": [], "edges": []}
 
     async def extract_semantic(self, text: str, intent: str) -> dict[str, Any]:
@@ -88,11 +88,18 @@ class OpenRouterQwenClient:
             pass
         return "REFLECTION"
 
-    async def extract_all(self, text: str, intent: str) -> dict[str, Any] | str:
+    async def extract_all(self, text: str, intent: str, graph_hints: dict | None = None) -> dict[str, Any] | str:
         payload = {
             "task": "extract_all",
             "text": text,
         }
+        if graph_hints:
+            if graph_hints.get("known_projects"):
+                payload["known_projects"] = graph_hints["known_projects"]
+            if graph_hints.get("known_parts"):
+                payload["known_parts"] = graph_hints["known_parts"]
+            if graph_hints.get("known_values"):
+                payload["known_values"] = graph_hints["known_values"]
         raw = await self._chat_json(payload)
         if not raw:
             return {"nodes": [], "edges": []}

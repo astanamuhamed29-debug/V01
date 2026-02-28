@@ -91,6 +91,13 @@ def generate_reply(
     projects = [node for node in nodes if node.type == "PROJECT"]
     events = [node for node in nodes if node.type == "EVENT"]
 
+    if intent == "META":
+        values = [n for n in nodes if n.type == "VALUE"]
+        if values:
+            val_name = values[0].name or "смысл"
+            return f"Слышу запрос на {val_name}. Давай разберём что именно ты ищешь.{history_note}"
+        return f"Слышу вопрос о смысле. Что именно хочется получать от этого?{history_note}"
+
     if intent == "FEELING_REPORT" or emotions:
         emotion_labels = [
             node.metadata.get("label") for node in emotions if node.metadata.get("label")

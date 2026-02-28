@@ -13,7 +13,7 @@ class FencedLLMClient:
     async def classify_intent(self, text: str) -> str:
         return "FEELING_REPORT"
 
-    async def extract_all(self, text: str, intent: str):
+    async def extract_all(self, text: str, intent: str, graph_hints: dict | None = None):
         self.extract_all_calls += 1
         return """```json
 {"intent":"FEELING_REPORT","nodes":[{"id":"n1","type":"PROJECT","name":"SELF-OS","key":"project:self-os"},{"id":"n2","type":"BELIEF","text":"я не вывезу проект","key":"belief:я не вывезу проект"},{"id":"n3","type":"EMOTION","metadata":{"valence":-0.7,"arousal":0.8,"label":"fear"}},{"id":"n4","type":"SOMA","metadata":{"location":"грудь","sensation":"тяжесть"}}],"edges":[{"source_node_id":"person:me","target_node_id":"n1","relation":"OWNS_PROJECT"},{"source_node_id":"person:me","target_node_id":"n2","relation":"HOLDS_BELIEF"},{"source_node_id":"person:me","target_node_id":"n3","relation":"FEELS"},{"source_node_id":"n3","target_node_id":"n1","relation":"EMOTION_ABOUT"},{"source_node_id":"n3","target_node_id":"n4","relation":"EXPRESSED_AS"}]}
@@ -46,7 +46,7 @@ class BrokenLLMClient:
     async def classify_intent(self, text: str) -> str:
         return "REFLECTION"
 
-    async def extract_all(self, text: str, intent: str):
+    async def extract_all(self, text: str, intent: str, graph_hints: dict | None = None):
         return "{bad_json"
 
     async def extract_semantic(self, text: str, intent: str):

@@ -83,14 +83,19 @@ class MessageProcessor:
 
         person = await self.graph_api.ensure_person_node(user_id)
 
-        nodes, edges, llm_intent = await self._extract_via_llm_all(
+        nodes, edges, llm_intent, graph_context = await self._extract_via_llm_all(
             user_id=user_id,
             text=text,
             intent=intent,
             person_id=person.id,
         )
         if llm_intent in router.INTENTS:
-            intent = llm_intent
+            if llm_intent == "REFLECTION" and intent != "REFLECTION":
+                pass
+            elif intent == "META" and llm_intent != "META":
+                pass
+            else:
+                intent = llm_intent
 
         created_nodes, created_edges = await self.graph_api.apply_changes(user_id, nodes, edges)
 
@@ -114,7 +119,6 @@ class MessageProcessor:
 
         emotion_nodes = [node for node in created_nodes if node.type == "EMOTION"]
         mood_context = await self.mood_tracker.update(user_id, emotion_nodes)
-        graph_context = await self.context_builder.build(user_id)
 
         reply_text = generate_reply(
             text=text,
@@ -162,11 +166,22 @@ class MessageProcessor:
         text: str,
         intent: str,
         person_id: str,
-    ) -> tuple[list[Node], list[Edge], str | None]:
+    ) -> tuple[list[Node], list[Edge], str | None, dict]:
+        graph_context = await self.context_builder.build(user_id)
         if self.use_llm:
             try:
+                graph_hints = {
+                    "known_projects": graph_context.get("active_projects", [])[:3],
+                    "known_parts": [
+                        p["key"] for p in graph_context.get("known_parts", [])[:3] if p.get("key")
+                    ],
+                    "known_values": [],
+                }
+                value_nodes = await self.graph_api.get_user_nodes_by_type(user_id, "VALUE")
+                graph_hints["known_values"] = [n.key for n in value_nodes if n.key][:3]
+
                 logger.info("LLM extract_all call")
-                payload = await self.llm_client.extract_all(text, "UNKNOWN")
+                payload = await self.llm_client.extract_all(text, "UNKNOWN", graph_hints=graph_hints)
                 logger.info("LLM raw response: %s", repr(payload))
                 if self._is_minimal_payload(payload):
                     logger.warning("LLM returned minimal/empty payload, using fallback")
@@ -175,18 +190,37 @@ class MessageProcessor:
                 llm_nodes, llm_edges = self._map_payload_to_graph(user_id=user_id, person_id=person_id, data=parsed)
                 logger.info("LLM mapped: nodes=%d edges=%d", len(llm_nodes), len(llm_edges))
                 if llm_nodes or llm_edges:
+                    base_intent = router.classify(text)
+                    has_value = any(node.type == "VALUE" for node in llm_nodes)
+                    has_critic = any(node.type == "PART" and node.key == "part:critic" for node in llm_nodes)
+                    lowered = text.lower()
+                    if base_intent == "META" and not has_value:
+                        logger.warning("LLM META response without VALUE node, using fallback")
+                        raise ValueError("meta without value")
+                    if "не нравится" in lowered and not has_critic:
+                        logger.warning("LLM response missed critic part on 'не нравится', using fallback")
+                        raise ValueError("missing critic part")
+                    if re.search(r"\b(более\s+жив\w*|живым)\b", lowered) and not has_value:
+                        logger.warning("LLM response missed VALUE on authenticity phrase, using fallback")
+                        raise ValueError("missing value node")
+
                     llm_intent = str(parsed.get("intent", "")).upper()
                     if llm_intent == "REFLECTION" and router.classify(text) == "FEELING_REPORT":
                         logger.warning("LLM downgraded emotion intent to REFLECTION, using fallback")
                         raise ValueError("llm intent downgrade")
-                    return llm_nodes, llm_edges, llm_intent
+                    return llm_nodes, llm_edges, llm_intent, graph_context
             except Exception as exc:
                 logger.warning("Failed LLM extract_all path: %s", exc)
 
         semantic_nodes, semantic_edges = await extractor_semantic.extract(user_id, text, intent, person_id)
         parts_nodes, parts_edges = await extractor_parts.extract(user_id, text, intent, person_id)
         emotion_nodes, emotion_edges = await extractor_emotion.extract(user_id, text, intent, person_id)
-        return [*semantic_nodes, *parts_nodes, *emotion_nodes], [*semantic_edges, *parts_edges, *emotion_edges], None
+        return (
+            [*semantic_nodes, *parts_nodes, *emotion_nodes],
+            [*semantic_edges, *parts_edges, *emotion_edges],
+            None,
+            graph_context,
+        )
 
     def _is_minimal_payload(self, payload: dict | str) -> bool:
         if not payload:

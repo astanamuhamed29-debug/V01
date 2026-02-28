@@ -144,3 +144,27 @@ def test_build_with_parts(tmp_path):
         assert context["known_parts"][0]["appearances"] >= context["known_parts"][1]["appearances"]
 
     asyncio.run(scenario())
+
+
+def test_build_with_values(tmp_path):
+    async def scenario() -> None:
+        storage = GraphStorage(db_path=tmp_path / "test.db")
+        builder = GraphContextBuilder(storage)
+
+        await storage.upsert_node(
+            Node(
+                user_id="u4",
+                type="VALUE",
+                name="польза",
+                key="value:польза",
+                text="в чем польза",
+                metadata={"appearances": 2},
+            )
+        )
+
+        context = await builder.build("u4")
+
+        assert context["known_values"]
+        assert context["known_values"][0]["key"] == "value:польза"
+
+    asyncio.run(scenario())

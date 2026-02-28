@@ -20,7 +20,8 @@ SCHEMA:
 2. Есть задача/действие (надо, нужно, сделать, запланировать) → TASK_LIKE
 3. Есть новая идея/концепция → IDEA
 4. Описание произошедшего → EVENT_REPORT
-5. Иначе → REFLECTION
+5. Вопросы о смысле/пользе ("зачем", "в чём польза", "что это даёт", "какой смысл") → META
+6. Иначе → REFLECTION
 
 ПРАВИЛА УЗЛОВ:
 - relation используй только из списка: HAS_VALUE, HOLDS_BELIEF, OWNS_PROJECT, HAS_TASK, RELATES_TO, DESCRIBES_EVENT, FEELS, EMOTION_ABOUT, EXPRESSED_AS, HAS_PART, TRIGGERED_BY, PROTECTS, CONFLICTS_WITH, SUPPORTS
@@ -39,9 +40,15 @@ SCHEMA:
     manager    → гиперконтроль, списки, "надо всё успеть", тревога о будущем
     firefighter→ импульсивные действия чтобы не чувствовать: "залип в игры", "переел", "запой"
     inner_child→ одиночество, "хочу чтобы кто-то понял", беспомощность
+- VALUE: ищи когда человек говорит что хочет/ценит/важно/зачем/смысл
+  name = название ценности одним словом (аутентичность, польза, свобода, связь, рост, безопасность)
+  key = "value:<name_lowercase>"
+  text = цитата из текста пользователя которая раскрывает эту ценность
+  Примеры триггеров: "хочу чтобы было живым", "важно чтобы", "в чём польза", "зачем это"
 - key для PROJECT: "project:<name_lowercase>", для TASK: "task:<text_lowercase_30chars>", для BELIEF: "belief:<text_lowercase_30chars>"
 - Ссылка на пользователя: "person:me"
 - nodes и edges НЕ должны быть пустыми если есть хоть одна сущность
+- При intent=META обязательно извлеки VALUE-узел с тем что человек ищет
 
 ПРИМЕР 1:
 Вход: {"task":"extract_all","text":"Я боюсь, что не вывезу проект SELF-OS, в груди всё сжалось."}
@@ -62,4 +69,14 @@ SCHEMA:
 Вход: {"task":"extract_all","text":"Снова залип в игры вместо работы. Ненавижу себя за это. Знаю что надо, но не могу начать."}
 Выход:
 {"intent":"FEELING_REPORT","nodes":[{"id":"n1","type":"PART","subtype":"firefighter","name":"Пожарный","key":"part:firefighter","text":"залип в игры вместо работы","metadata":{"voice":"Мне нужно было сбежать от напряжения"}},{"id":"n2","type":"PART","subtype":"critic","name":"Критик","key":"part:critic","text":"Ненавижу себя за это","metadata":{"voice":"Ты снова подвёл. Ты недостаточно хорош."}},{"id":"n3","type":"EMOTION","metadata":{"label":"стыд","valence":-0.8,"arousal":-0.3,"dominance":-0.6,"intensity":0.9}},{"id":"n4","type":"EMOTION","metadata":{"label":"беспомощность","valence":-0.7,"arousal":-0.4,"dominance":-0.7,"intensity":0.7}}],"edges":[{"source_node_id":"person:me","target_node_id":"n1","relation":"HAS_PART","metadata":{}},{"source_node_id":"person:me","target_node_id":"n2","relation":"HAS_PART","metadata":{}},{"source_node_id":"person:me","target_node_id":"n3","relation":"FEELS","metadata":{}},{"source_node_id":"n2","target_node_id":"n3","relation":"TRIGGERED_BY","metadata":{}},{"source_node_id":"n1","target_node_id":"n3","relation":"PROTECTS","metadata":{}}]}
+
+ПРИМЕР 5:
+Вход: {"task":"extract_all","text":"накапливаешь а в чем твоя польза","known_values":["value:смысл"]}
+Выход:
+{"intent":"META","nodes":[{"id":"n1","type":"VALUE","name":"польза","key":"value:польза","text":"в чем твоя польза"},{"id":"n2","type":"BELIEF","text":"накопление данных без отдачи бессмысленно","key":"belief:накопление без отдачи бессмысленно"}],"edges":[{"source_node_id":"person:me","target_node_id":"n1","relation":"HAS_VALUE"},{"source_node_id":"person:me","target_node_id":"n2","relation":"HOLDS_BELIEF"}]}
+
+ПРИМЕР 6:
+Вход: {"task":"extract_all","text":"хочу сделать вывод более живым мне это не нравится","known_parts":["part:critic"]}
+Выход:
+{"intent":"FEELING_REPORT","nodes":[{"id":"n1","type":"VALUE","name":"аутентичность","key":"value:аутентичность","text":"хочу сделать вывод более живым"},{"id":"n2","type":"EMOTION","metadata":{"label":"неудовлетворённость","valence":-0.5,"arousal":0.3,"dominance":0.2,"intensity":0.6}},{"id":"n3","type":"PART","subtype":"critic","name":"Критик","key":"part:critic","text":"мне это не нравится","metadata":{"voice":"Это недостаточно хорошо"}}],"edges":[{"source_node_id":"person:me","target_node_id":"n1","relation":"HAS_VALUE"},{"source_node_id":"person:me","target_node_id":"n2","relation":"FEELS"},{"source_node_id":"person:me","target_node_id":"n3","relation":"HAS_PART"},{"source_node_id":"n3","target_node_id":"n2","relation":"TRIGGERED_BY"}]}
 """.strip()
