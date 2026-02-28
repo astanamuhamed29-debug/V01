@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import os
+from typing import Any
 
-from aiogram import Bot, Dispatcher, F
+from aiogram import Bot, Dispatcher, F, Router
 from aiogram.types import Message
 from dotenv import load_dotenv
 
-from interfaces.cli.main import build_processor
+from core.pipeline.processor import MessageProcessor
+from interfaces.processor_factory import build_processor
+
+router = Router()
 
 
 def _get_bot_token() -> str:
@@ -17,15 +22,21 @@ def _get_bot_token() -> str:
     return token
 
 
+@router.message(F.text)
+async def handle_text_message(message: Message, processor: MessageProcessor) -> None:
+    await handle_incoming_message(message, processor)
+
+
+async def on_startup(dispatcher: Dispatcher, **kwargs: Any) -> None:
+    dispatcher["processor"] = build_processor()
+
+
 async def run_bot() -> None:
     token = _get_bot_token()
     bot = Bot(token=token)
     dispatcher = Dispatcher()
-    processor = build_processor()
-
-    @dispatcher.message(F.text)
-    async def handle_text_message(message: Message) -> None:
-        await handle_incoming_message(message, processor)
+    dispatcher.include_router(router)
+    dispatcher.startup.register(on_startup)
 
     try:
         await dispatcher.start_polling(bot)
@@ -34,8 +45,6 @@ async def run_bot() -> None:
 
 
 def main() -> None:
-    import asyncio
-
     asyncio.run(run_bot())
 
 
@@ -48,7 +57,7 @@ async def handle_incoming_message(message: Message, processor) -> None:
         return
 
     user_id = str(message.from_user.id)
-    result = await processor.process_message(
+    result = await processor.process(
         user_id,
         message.text,
         source="telegram",

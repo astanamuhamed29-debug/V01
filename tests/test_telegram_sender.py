@@ -20,7 +20,7 @@ def test_sender_sends_message_with_int_chat_id_and_closes_session():
             await send_to_user("12345", "hello")
 
         bot_ctor.assert_called_once_with(token="token")
-        fake_bot.send_message.assert_awaited_once_with(chat_id=12345, text="hello")
+        fake_bot.send_message.assert_awaited_once_with(chat_id="12345", text="hello")
         fake_bot.session.close.assert_awaited_once()
 
     asyncio.run(scenario())

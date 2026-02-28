@@ -17,6 +17,6 @@ def _get_bot_token() -> str:
 async def send_to_user(user_id: str, text: str) -> None:
     bot = Bot(token=_get_bot_token())
     try:
-        await bot.send_message(chat_id=int(user_id), text=text)
+        await bot.send_message(chat_id=user_id, text=text)
     finally:
         await bot.session.close()
