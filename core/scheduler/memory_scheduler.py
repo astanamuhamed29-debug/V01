@@ -121,9 +121,9 @@ class MemoryScheduler:
         )
 
     async def stop(self) -> None:
-        """Shutdown the scheduler gracefully."""
+        """Shutdown the scheduler gracefully, waiting for in-progress jobs."""
         if self._scheduler is not None:
-            self._scheduler.shutdown(wait=False)
+            self._scheduler.shutdown(wait=True)
             self._started = False
             logger.info("MemoryScheduler stopped")
 

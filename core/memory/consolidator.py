@@ -33,6 +33,7 @@ FORGETTING_EDGE_THRESHOLD = 0.05
 FORGETTING_NODE_THRESHOLD = 0.1
 PROTECTED_TYPES = frozenset({"BELIEF", "NEED", "VALUE"})
 PROTECTED_REVIEW_MIN = 2
+MAX_ARCHETYPE_NAME_LENGTH = 120
 
 
 @dataclass(slots=True)
@@ -191,7 +192,7 @@ class MemoryConsolidator:
                 id=str(uuid4()),
                 user_id=user_id,
                 type="BELIEF",
-                name=summary[:120],
+                name=summary[:MAX_ARCHETYPE_NAME_LENGTH],
                 text=summary,
                 key=f"archetype:{uuid4().hex[:8]}",
                 metadata=ensure_metadata_defaults({

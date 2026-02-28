@@ -412,7 +412,12 @@ class Neo4jStorage:
         node_id: str,
         depth: int = 2,
     ) -> list[Node]:
-        """Return all nodes within *depth* hops of *node_id*."""
+        """Return all nodes within *depth* hops of *node_id*.
+
+        .. note::
+           Requires the APOC plugin to be installed in the Neo4j instance.
+           See https://neo4j.com/labs/apoc/
+        """
         await self._ensure_initialized()
         async with self._driver.session(database=self._database) as session:
             result = await session.run(
