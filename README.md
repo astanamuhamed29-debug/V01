@@ -16,6 +16,54 @@
   - `BELIEF` по фразам «я боюсь...», «я не вывезу...», «мне кажется, что я...».
   - `EMOTION`/`SOMA` — простые сигналы.
 
+---
+
+## Architecture Overview
+
+```
+User Message
+    │
+    ▼
+[Journal Storage]  ──► raw SQLite journal_entries
+    │
+    ▼
+[Router]  ──► intent classification (regex)
+    │
+    ├──► [LLM Extractor]  (OpenRouter / Qwen)
+    │         └──► parse_json_payload → map_payload_to_graph
+    │
+    └──► [Regex Extractors]  (fallback)
+              ├── extractor_semantic
+              ├── extractor_emotion
+              └── extractor_parts
+    │
+    ▼
+[Graph API]  ──► upsert nodes & edges → SELF-Graph (SQLite)
+    │
+    ├──► [Embedding Service]  → dense vectors stored per node
+    ├──► [Mood Tracker]       → mood_snapshots
+    ├──► [Parts Memory]       → IFS Part appearances
+    └──► [Context Builder]    → graph_context dict
+    │
+    ▼
+[Reply Generator]  ──► final response to user
+```
+
+### Frontier Features
+
+| Feature | Module |
+|---|---|
+| Multi-Agent Orchestration | `agents/orchestrator.py` |
+| Hybrid Vector Search (Dense + BM25) | `core/search/hybrid_search.py` |
+| Retrieval-Augmented Generation (RAG) | `core/rag/` |
+| Spaced Repetition / Ebbinghaus curves | `core/graph/model.py` |
+| Cognitive Distortion Detector | `core/analytics/cognitive_detector.py` |
+| Session Memory with sliding window | `core/context/session_memory.py` |
+| PageRank-like Graph Analytics | `core/analytics/graph_metrics.py` |
+| Security hardening (text validation) | `core/pipeline/processor.py`, `config.py` |
+
+---
+
 ## Запуск CLI
 
 ```bash
@@ -68,6 +116,27 @@ python -m interfaces.telegram_bot.main
 
 Бот вернёт недельный срез: mood по `mood_snapshots`, топ частей и активные ценности.
 
+## Development Setup (with Docker)
+
+```bash
+# 1. Copy env template and fill in secrets
+cp .env.example .env
+
+# 2. Build and run
+docker compose up --build
+
+# 3. Or run locally
+pip install -e ".[dev]"
+pytest
+```
+
+### Pre-commit hooks
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
 ## Деплой на VPS
 
 Готовые production-артефакты:
@@ -85,6 +154,14 @@ python -m interfaces.telegram_bot.main
 pytest
 ```
 
+## Contributing
+
+1. Fork → feature branch → PR against `main`.
+2. Ensure `pytest` passes and `ruff check .` reports no errors.
+3. Add docstrings to every new public class and function.
+4. New features must include unit tests in `tests/`.
+5. Do not break existing tests.
+
 ## Проверочный сценарий
 
 В CLI введите по очереди:
@@ -96,3 +173,4 @@ pytest
 После этого в БД появятся соответствующие записи `journal_entries`, а в графе — узлы `PROJECT`, `NOTE`, `TASK`, `BELIEF` и связи `OWNS_PROJECT`, `HAS_TASK`, `HOLDS_BELIEF`, `RELATES_TO`.
 
 Для Telegram-сценария сообщение вида `Привет, я хочу переехать` создаёт `PROJECT` с именем `переезд`.
+

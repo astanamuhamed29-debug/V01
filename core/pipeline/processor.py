@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 from agents.reply_minimal import generate_reply
-from config import USE_LLM
+from config import MAX_TEXT_LENGTH, USE_LLM
 from core.context.builder import GraphContextBuilder
 from core.graph.api import GraphAPI
 from core.graph.model import Edge, Node
@@ -32,6 +32,16 @@ if TYPE_CHECKING:
     from core.analytics.calibrator import ThresholdCalibrator
 
 logger = logging.getLogger(__name__)
+
+# Control characters to strip during sanitization (keep tab, newline, carriage return)
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _sanitize_text(text: str) -> str:
+    """Strip excess whitespace and control characters from *text*."""
+    text = _CONTROL_CHAR_RE.sub("", text)
+    return text.strip()
+
 
 # Конфигурируемые правила валидации LLM-ответа
 # Формат: (regex_pattern_or_None, required_node_type, required_key_or_None, error_msg)
@@ -87,6 +97,9 @@ class MessageProcessor:
         source: str = "cli",
         timestamp: str | None = None,
     ) -> ProcessResult:
+        text = _sanitize_text(text)
+        if len(text) > MAX_TEXT_LENGTH:
+            raise ValueError(f"Message too long: {len(text)} chars (max {MAX_TEXT_LENGTH})")
         ts = timestamp or datetime.now(timezone.utc).isoformat()
 
         await self.journal.append(user_id=user_id, timestamp=ts, text=text, source=source)

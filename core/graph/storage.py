@@ -712,6 +712,44 @@ class GraphStorage:
         )
         await conn.commit()
 
+    async def hybrid_search(
+        self,
+        user_id: str,
+        query_text: str,
+        query_embedding: list[float] | None = None,
+        alpha: float = 0.7,
+        top_k: int = 10,
+        use_rrf: bool = False,
+    ) -> list[tuple[Node, float]]:
+        """Hybrid dense + sparse search over user nodes.
+
+        Parameters
+        ----------
+        user_id:
+            Owner of the nodes to search.
+        query_text:
+            Raw query string used for TF-IDF sparse scoring.
+        query_embedding:
+            Optional dense query vector for cosine similarity scoring.
+        alpha:
+            Weight for dense scores (0 = sparse only, 1 = dense only).
+        top_k:
+            Maximum number of results to return.
+        use_rrf:
+            If ``True``, use Reciprocal Rank Fusion instead of weighted sum.
+        """
+        from core.search.hybrid_search import HybridSearchEngine
+
+        nodes = await self.find_nodes(user_id, limit=500)
+        engine = HybridSearchEngine(alpha=alpha)
+        return engine.search(
+            query_text=query_text,
+            query_embedding=query_embedding,
+            nodes=nodes,
+            top_k=top_k,
+            use_rrf=use_rrf,
+        )
+
     async def find_similar_nodes(
         self,
         user_id: str,
