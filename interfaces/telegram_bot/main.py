@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, CommandStart
@@ -17,6 +18,48 @@ from interfaces.processor_factory import build_processor
 
 router = Router()
 logger = logging.getLogger(__name__)
+LOCK_PATH = Path("data/telegram_bot.lock")
+
+
+class BotInstanceLockError(RuntimeError):
+    pass
+
+
+def _is_process_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _acquire_bot_instance_lock(lock_path: Path = LOCK_PATH) -> Path:
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if lock_path.exists():
+        try:
+            existing_pid = int(lock_path.read_text(encoding="utf-8").strip())
+        except (ValueError, OSError):
+            existing_pid = 0
+
+        if _is_process_alive(existing_pid):
+            raise BotInstanceLockError(
+                f"Another local bot instance is already running (pid={existing_pid})."
+            )
+        lock_path.unlink(missing_ok=True)
+
+    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+    fd = os.open(str(lock_path), flags)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(str(os.getpid()))
+
+    return lock_path
+
+
+def _release_bot_instance_lock(lock_path: Path) -> None:
+    lock_path.unlink(missing_ok=True)
 
 
 def _get_bot_token() -> str:
@@ -153,7 +196,16 @@ async def run_bot() -> None:
 
 def main() -> None:
     logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO))
-    asyncio.run(run_bot())
+    lock_path: Path | None = None
+    try:
+        lock_path = _acquire_bot_instance_lock()
+        asyncio.run(run_bot())
+    except BotInstanceLockError as exc:
+        logger.error("%s", exc)
+        raise SystemExit(1) from exc
+    finally:
+        if lock_path is not None:
+            _release_bot_instance_lock(lock_path)
 
 
 async def handle_incoming_message(message: Message, processor) -> None:
