@@ -156,6 +156,9 @@ class MessageProcessor:
                 logger.info("LLM mapped: nodes=%d edges=%d", len(llm_nodes), len(llm_edges))
                 if llm_nodes or llm_edges:
                     llm_intent = str(parsed.get("intent", "")).upper()
+                    if llm_intent == "REFLECTION" and router.classify(text) == "FEELING_REPORT":
+                        logger.warning("LLM downgraded emotion intent to REFLECTION, using fallback")
+                        raise ValueError("llm intent downgrade")
                     return llm_nodes, llm_edges, llm_intent
             except Exception as exc:
                 logger.warning("Failed LLM extract_all path: %s", exc)

@@ -89,15 +89,37 @@ class GraphAPI:
         return await self.storage.add_edge(edge)
 
     async def apply_changes(self, user_id: str, nodes: list[Node], edges: list[Edge]) -> tuple[list[Node], list[Edge]]:
-        created_nodes: list[Node] = []
+        created_nodes_by_id: dict[str, Node] = {}
         node_id_map: dict[str, str] = {}
 
         for node in nodes:
             if node.user_id != user_id:
                 continue
-            saved = await self.storage.upsert_node(node)
-            node_id_map[node.id] = saved.id
-            created_nodes.append(saved)
+
+            original_id = node.id
+            candidate = node
+
+            if node.key:
+                existing = await self.storage.find_by_key(user_id, node.type, node.key)
+                if existing:
+                    candidate = Node(
+                        id=existing.id,
+                        user_id=user_id,
+                        type=node.type,
+                        name=node.name or existing.name,
+                        text=node.text or existing.text,
+                        subtype=node.subtype or existing.subtype,
+                        key=node.key,
+                        metadata={**existing.metadata, **node.metadata},
+                        created_at=existing.created_at,
+                    )
+
+            saved = await self.storage.upsert_node(candidate)
+            node_id_map[original_id] = saved.id
+            node_id_map[saved.id] = saved.id
+            created_nodes_by_id[saved.id] = saved
+
+        created_nodes = list(created_nodes_by_id.values())
 
         created_edges: list[Edge] = []
         for edge in edges:

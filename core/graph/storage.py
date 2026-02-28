@@ -85,30 +85,36 @@ class GraphStorage:
                     (node.user_id, node.type, node.key),
                 )
                 existing = await cursor.fetchone()
-                if existing:
-                    await conn.execute(
-                        """
-                        UPDATE nodes
-                        SET name = COALESCE(?, name),
-                            text = COALESCE(?, text),
-                            subtype = COALESCE(?, subtype),
-                            metadata_json = ?
-                        WHERE id = ?
-                        """,
-                        (
-                            node.name,
-                            node.text,
-                            node.subtype,
-                            json.dumps(node.metadata, ensure_ascii=False),
-                            existing["id"],
-                        ),
-                    )
-                    await conn.commit()
-                    return await self.get_node(existing["id"])
+                canonical_id = existing["id"] if existing else node.id
+                created_at = existing["created_at"] if existing else node.created_at
+
+                await conn.execute(
+                    """
+                    INSERT OR REPLACE INTO nodes (id, user_id, type, name, text, subtype, key, metadata_json, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        canonical_id,
+                        node.user_id,
+                        node.type,
+                        node.name,
+                        node.text,
+                        node.subtype,
+                        node.key,
+                        json.dumps(node.metadata, ensure_ascii=False),
+                        created_at,
+                    ),
+                )
+                await conn.commit()
+                return await self.get_node(canonical_id)
+
+            cursor = await conn.execute("SELECT created_at FROM nodes WHERE id = ?", (node.id,))
+            existing = await cursor.fetchone()
+            created_at = existing["created_at"] if existing else node.created_at
 
             await conn.execute(
                 """
-                INSERT INTO nodes (id, user_id, type, name, text, subtype, key, metadata_json, created_at)
+                INSERT OR REPLACE INTO nodes (id, user_id, type, name, text, subtype, key, metadata_json, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
@@ -118,13 +124,13 @@ class GraphStorage:
                     node.name,
                     node.text,
                     node.subtype,
-                    node.key,
+                    None,
                     json.dumps(node.metadata, ensure_ascii=False),
-                    node.created_at,
+                    created_at,
                 ),
             )
             await conn.commit()
-            return node
+            return await self.get_node(node.id)
 
     async def add_edge(self, edge: Edge) -> Edge:
         await self._ensure_initialized()

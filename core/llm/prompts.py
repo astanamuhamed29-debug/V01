@@ -25,15 +25,16 @@ SCHEMA:
 
 ПРАВИЛА УЗЛОВ:
 - EMOTION: обязательно metadata.label (название эмоции), metadata.valence (-1..1), metadata.arousal (-1..1)
-- "между X и Y" → два отдельных EMOTION-узла
+- "между X и Y" или "X и Y" при перечислении эмоций → два отдельных EMOTION-узла
 - SOMA: metadata.location (часть тела), metadata.sensation (ощущение)
+- key для PROJECT: "project:<name_lowercase>", для TASK: "task:<text_lowercase_30chars>", для BELIEF: "belief:<text_lowercase_30chars>"
 - Ссылка на пользователя: "person:me"
 - nodes и edges НЕ должны быть пустыми если есть хоть одна сущность
 
 ПРИМЕР 1:
 Вход: {"task":"extract_all","text":"Я боюсь, что не вывезу проект SELF-OS, в груди всё сжалось."}
 Выход:
-{"intent":"FEELING_REPORT","nodes":[{"id":"n1","type":"PROJECT","name":"SELF-OS","key":"project:self-os","metadata":{}},{"id":"n2","type":"BELIEF","text":"Боюсь не вывезти проект","key":"belief:не вывезу self-os","metadata":{}},{"id":"n3","type":"EMOTION","metadata":{"label":"страх","valence":-0.8,"arousal":0.6}},{"id":"n4","type":"SOMA","metadata":{"location":"грудь","sensation":"сжатие"}}],"edges":[{"source_node_id":"person:me","target_node_id":"n1","relation":"OWNS_PROJECT","metadata":{}},{"source_node_id":"person:me","target_node_id":"n2","relation":"HOLDS_BELIEF","metadata":{}},{"source_node_id":"person:me","target_node_id":"n3","relation":"FEELS","metadata":{}},{"source_node_id":"n3","target_node_id":"n1","relation":"EMOTION_ABOUT","metadata":{}},{"source_node_id":"n3","target_node_id":"n4","relation":"EXPRESSED_AS","metadata":{}}]}
+{"intent":"FEELING_REPORT","nodes":[{"id":"n1","type":"PROJECT","name":"SELF-OS","key":"project:self-os","metadata":{}},{"id":"n2","type":"BELIEF","text":"Боюсь не вывезти проект","key":"belief:боюсь не вывезти проект","metadata":{}},{"id":"n3","type":"EMOTION","metadata":{"label":"страх","valence":-0.8,"arousal":0.6}},{"id":"n4","type":"SOMA","metadata":{"location":"грудь","sensation":"сжатие"}}],"edges":[{"source_node_id":"person:me","target_node_id":"n1","relation":"OWNS_PROJECT","metadata":{}},{"source_node_id":"person:me","target_node_id":"n2","relation":"HOLDS_BELIEF","metadata":{}},{"source_node_id":"person:me","target_node_id":"n3","relation":"FEELS","metadata":{}},{"source_node_id":"n3","target_node_id":"n1","relation":"EMOTION_ABOUT","metadata":{}},{"source_node_id":"n3","target_node_id":"n4","relation":"EXPRESSED_AS","metadata":{}}]}
 
 ПРИМЕР 2:
 Вход: {"task":"extract_all","text":"Надо выделить вечер, чтобы написать архитектуру. Сейчас просто ступор."}
