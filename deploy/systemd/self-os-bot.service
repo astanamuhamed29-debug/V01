@@ -1,0 +1,18 @@
+[Unit]
+Description=SELF-OS Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/self-os
+EnvironmentFile=/opt/self-os/.env
+ExecStart=/opt/self-os/.venv/bin/python -m interfaces.telegram_bot.main
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGINT
+
+[Install]
+WantedBy=multi-user.target

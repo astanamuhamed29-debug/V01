@@ -6,7 +6,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 
 from agents.reply_minimal import generate_reply
@@ -151,11 +151,25 @@ class MessageProcessor:
                     )
 
         part_nodes = [node for node in created_nodes if node.type == "PART"]
+        value_nodes = [node for node in created_nodes if node.type == "VALUE"]
         parts_context: list[dict] = []
         for part in part_nodes:
             history = await self.parts_memory.register_appearance(user_id, part)
             if history.get("part"):
                 parts_context.append(history)
+
+        if part_nodes and value_nodes:
+            for part in part_nodes:
+                for value in value_nodes:
+                    conflict_edge = await self.graph_api.create_edge(
+                        user_id=user_id,
+                        source_node_id=part.id,
+                        target_node_id=value.id,
+                        relation="CONFLICTS_WITH",
+                        metadata={"auto": "session_part_value_conflict"},
+                    )
+                    created_edges.append(conflict_edge)
+                    graph_context["session_conflict"] = True
 
         emotion_nodes = [node for node in created_nodes if node.type == "EMOTION"]
         mood_context = await self.mood_tracker.update(user_id, emotion_nodes)
@@ -194,6 +208,64 @@ class MessageProcessor:
         )
 
         return ProcessResult(intent=intent, reply_text=final_reply, nodes=created_nodes, edges=created_edges)
+
+    async def build_weekly_report(self, user_id: str) -> str:
+        now = datetime.now(timezone.utc)
+        week_ago = now - timedelta(days=7)
+
+        snapshots = await self.graph_api.storage.get_mood_snapshots(user_id, limit=30)
+        weekly = []
+        for snapshot in snapshots:
+            ts = snapshot.get("timestamp")
+            if not ts:
+                continue
+            try:
+                dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if dt >= week_ago:
+                weekly.append(snapshot)
+
+        graph_context = await self.context_builder.build(user_id)
+        top_parts = graph_context.get("known_parts", [])[:3]
+        active_values = graph_context.get("known_values", [])[:5]
+
+        if not weekly:
+            part_line = ", ".join(p.get("name") or p.get("key") or "part" for p in top_parts) or "нет"
+            value_line = ", ".join(v.get("name") or v.get("key") or "value" for v in active_values) or "нет"
+            return (
+                "📊 Недельный отчёт\n"
+                "За последние 7 дней mood-срезов пока нет.\n"
+                f"Топ частей: {part_line}\n"
+                f"Активные ценности: {value_line}"
+            )
+
+        avg_valence = sum(float(s.get("valence_avg", 0.0)) for s in weekly) / len(weekly)
+        avg_arousal = sum(float(s.get("arousal_avg", 0.0)) for s in weekly) / len(weekly)
+        avg_dominance = sum(float(s.get("dominance_avg", 0.0)) for s in weekly) / len(weekly)
+
+        labels: dict[str, int] = {}
+        for snapshot in weekly:
+            label = str(snapshot.get("dominant_label") or "").strip()
+            if not label:
+                continue
+            labels[label] = labels.get(label, 0) + 1
+        top_label = max(labels.items(), key=lambda item: item[1])[0] if labels else "не определено"
+
+        part_line = ", ".join(
+            f"{p.get('name') or p.get('key') or 'part'} ({p.get('appearances', 1)})"
+            for p in top_parts
+        ) or "нет"
+        value_line = ", ".join(v.get("name") or v.get("key") or "value" for v in active_values) or "нет"
+
+        return (
+            "📊 Недельный отчёт\n"
+            f"Срезов: {len(weekly)}\n"
+            f"Среднее состояние: valence={avg_valence:.2f}, arousal={avg_arousal:.2f}, dominance={avg_dominance:.2f}\n"
+            f"Чаще всего: {top_label}\n"
+            f"Топ частей: {part_line}\n"
+            f"Активные ценности: {value_line}"
+        )
 
     async def process(
         self,

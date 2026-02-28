@@ -164,6 +164,9 @@ class OpenRouterQwenClient:
                 if val_names:
                     context_lines.append(f"Важные ценности: {val_names}")
 
+        if graph_context and graph_context.get("session_conflict"):
+            context_lines.append("Обнаружено внутреннее противоречие между ценностью и активной частью")
+
         if mood_context:
             label = mood_context.get("dominant_label")
             d = mood_context.get("dominance_avg", 0)

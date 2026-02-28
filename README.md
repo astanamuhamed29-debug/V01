@@ -60,6 +60,25 @@ TELEGRAM_BOT_TOKEN=your_bot_token_here
 python -m interfaces.telegram_bot.main
 ```
 
+Команда отчёта в Telegram:
+
+```text
+/report
+```
+
+Бот вернёт недельный срез: mood по `mood_snapshots`, топ частей и активные ценности.
+
+## Деплой на VPS
+
+Готовые production-артефакты:
+
+- `deploy/.env.vps.example`
+- `deploy/systemd/self-os-bot.service`
+- `deploy/nginx/self-os.conf`
+- `deploy/VPS_DEPLOY.md`
+
+Пошаговый деплой см. в `deploy/VPS_DEPLOY.md`.
+
 ## Тесты
 
 ```bash

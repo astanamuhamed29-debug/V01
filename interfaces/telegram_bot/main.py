@@ -5,6 +5,7 @@ import logging
 import os
 
 from aiogram import Bot, Dispatcher, F, Router
+from aiogram.filters import Command
 from aiogram.types import Message
 from dotenv import load_dotenv
 
@@ -21,6 +22,19 @@ def _get_bot_token() -> str:
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
     return token
+
+
+@router.message(Command("report"))
+async def handle_report_message(message: Message, processor: MessageProcessor) -> None:
+    if message.from_user is None:
+        return
+    user_id = str(message.from_user.id)
+    try:
+        report = await processor.build_weekly_report(user_id)
+        await message.answer(report)
+    except Exception:
+        logger.exception("Telegram /report failed for user=%s", user_id)
+        await message.answer("Не смог собрать отчёт прямо сейчас. Попробуй ещё раз.")
 
 
 @router.message(F.text)
@@ -40,6 +54,7 @@ async def run_bot() -> None:
         await dispatcher.start_polling(bot)
     finally:
         await bot.session.close()
+        await processor.graph_api.storage.close()
 
 
 def main() -> None:
