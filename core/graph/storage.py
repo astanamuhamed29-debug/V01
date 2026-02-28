@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import aiosqlite
 
-from core.graph.model import Edge, Node
+from core.graph.model import Edge, Node, ensure_metadata_defaults
 
 
 class GraphStorage:
@@ -122,17 +122,53 @@ class GraphStorage:
                     ON signal_feedback(user_id, signal_type);
                 """
             )
-            try:
-                await conn.execute("ALTER TABLE nodes ADD COLUMN embedding_json TEXT")
-            except Exception:
-                pass
+            # ── Sprint-0 migrations (backward-compatible ALTER TABLE) ──
+            _migrations = [
+                "ALTER TABLE nodes ADD COLUMN embedding_json TEXT",
+                "ALTER TABLE nodes ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0",
+                # mood_snapshots — fields for future predictive engine
+                "ALTER TABLE mood_snapshots ADD COLUMN stressor_tags TEXT DEFAULT '[]'",
+                "ALTER TABLE mood_snapshots ADD COLUMN active_parts_keys TEXT DEFAULT '[]'",
+                "ALTER TABLE mood_snapshots ADD COLUMN intervention_applied TEXT",
+                "ALTER TABLE mood_snapshots ADD COLUMN feedback_score INTEGER",
+            ]
+            for stmt in _migrations:
+                try:
+                    await conn.execute(stmt)
+                except Exception:
+                    pass  # column already exists
+
+            # intervention_outcomes — minimal OutcomeTracker table
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS intervention_outcomes (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    intervention_type TEXT NOT NULL,
+                    pre_valence REAL,
+                    pre_arousal REAL,
+                    pre_dominance REAL,
+                    post_valence REAL,
+                    post_arousal REAL,
+                    post_dominance REAL,
+                    user_feedback INTEGER,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_intervention_outcomes_user
+                    ON intervention_outcomes(user_id, created_at DESC)
+                """
+            )
             await conn.commit()
             self._initialized = True
 
     async def upsert_node(self, node: Node) -> Node:
         await self._ensure_initialized()
 
-        node_metadata = dict(node.metadata)
+        node_metadata = ensure_metadata_defaults(dict(node.metadata))
         if node.type == "EMOTION" and "created_at" not in node_metadata:
             node_metadata["created_at"] = datetime.now(timezone.utc).isoformat()
 
@@ -442,7 +478,7 @@ class GraphStorage:
     ) -> list[Node]:
         await self._ensure_initialized()
 
-        query = "SELECT * FROM nodes WHERE user_id = ?"
+        query = "SELECT * FROM nodes WHERE user_id = ? AND (is_deleted IS NULL OR is_deleted = 0)"
         params: list[object] = [user_id]
         if node_type:
             query += " AND type = ?"
@@ -472,6 +508,7 @@ class GraphStorage:
             """
             SELECT * FROM nodes
             WHERE user_id = ? AND type = ?
+              AND (is_deleted IS NULL OR is_deleted = 0)
             ORDER BY created_at DESC
             LIMIT ?
             """,
@@ -766,7 +803,7 @@ class GraphStorage:
         await self._ensure_initialized()
         conn = await self._get_conn()
 
-        query = "SELECT * FROM nodes WHERE user_id = ? AND embedding_json IS NOT NULL"
+        query = "SELECT * FROM nodes WHERE user_id = ? AND embedding_json IS NOT NULL AND (is_deleted IS NULL OR is_deleted = 0)"
         params: list[object] = [user_id]
         if node_types:
             placeholders = ",".join("?" * len(node_types))
@@ -787,6 +824,52 @@ class GraphStorage:
 
         results.sort(key=lambda item: item[1], reverse=True)
         return results[:top_k]
+
+    # ── Sprint-0: soft-delete & retention helpers ──────────────────
+
+    async def soft_delete_node(self, node_id: str) -> None:
+        """Mark a node as deleted without physically removing it."""
+        await self._ensure_initialized()
+        conn = await self._get_conn()
+        await conn.execute("UPDATE nodes SET is_deleted = 1 WHERE id = ?", (node_id,))
+        await conn.commit()
+
+    async def get_nodes_by_retention(
+        self,
+        user_id: str,
+        max_retention: float = 0.3,
+        node_types: list[str] | None = None,
+        limit: int = 200,
+    ) -> list[Node]:
+        """Return non-deleted nodes whose *salience_score* in metadata ≤ *max_retention*.
+
+        Useful for finding consolidation / forgetting candidates.
+        """
+        await self._ensure_initialized()
+        conn = await self._get_conn()
+
+        query = (
+            "SELECT * FROM nodes WHERE user_id = ? AND "
+            "(is_deleted IS NULL OR is_deleted = 0)"
+        )
+        params: list[object] = [user_id]
+        if node_types:
+            placeholders = ",".join("?" * len(node_types))
+            query += f" AND type IN ({placeholders})"
+            params.extend(node_types)
+        query += " ORDER BY created_at LIMIT ?"
+        params.append(limit)
+
+        cursor = await conn.execute(query, params)
+        rows = await cursor.fetchall()
+
+        results: list[Node] = []
+        for row in rows:
+            node = _row_to_node(row)
+            salience = float(node.metadata.get("salience_score", 1.0))
+            if salience <= max_retention:
+                results.append(node)
+        return results
 
 
 def _row_to_node(row: aiosqlite.Row) -> Node:

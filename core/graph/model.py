@@ -75,6 +75,24 @@ class Edge:
     created_at: str = field(default_factory=utc_now_iso)
 
 
+_METADATA_DEFAULTS: dict[str, Any] = {
+    "review_count": 0,
+    "last_reviewed_at": None,
+    "salience_score": 1.0,
+    "abstraction_level": 0,
+}
+
+
+def ensure_metadata_defaults(metadata: dict[str, Any]) -> dict[str, Any]:
+    """Return *metadata* with Sprint-0 default fields filled in.
+
+    Only missing keys are added; existing values are never overwritten.
+    """
+    for key, default in _METADATA_DEFAULTS.items():
+        metadata.setdefault(key, default)
+    return metadata
+
+
 def edge_weight(edge: Edge, half_life_days: float = 30.0) -> float:
     """
     Temporal decay weight. Свежие рёбра весят больше.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +16,7 @@ class JournalEntry:
     timestamp: str
     text: str
     source: str
+    session_id: str | None = None
 
 
 class JournalStorage:
@@ -50,23 +52,40 @@ class JournalStorage:
                 )
                 """
             )
+                # Sprint-0: session_id + cognitive_load columns
+                for stmt in [
+                    "ALTER TABLE journal_entries ADD COLUMN session_id TEXT",
+                    "ALTER TABLE journal_entries ADD COLUMN cognitive_load REAL",
+                ]:
+                    with contextlib.suppress(Exception):
+                        await conn.execute(stmt)
                 await conn.commit()
             self._initialized = True
 
-    async def append(self, user_id: str, timestamp: str, text: str, source: str) -> JournalEntry:
+    async def append(
+        self,
+        user_id: str,
+        timestamp: str,
+        text: str,
+        source: str,
+        session_id: str | None = None,
+    ) -> JournalEntry:
         await self._ensure_initialized()
 
         async with self._connect() as conn:
             cursor = await conn.execute(
                 """
-                INSERT INTO journal_entries (user_id, timestamp, text, source)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO journal_entries (user_id, timestamp, text, source, session_id)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (user_id, timestamp, text, source),
+                (user_id, timestamp, text, source, session_id),
             )
             await conn.commit()
             entry_id = int(cursor.lastrowid)
-        return JournalEntry(id=entry_id, user_id=user_id, timestamp=timestamp, text=text, source=source)
+        return JournalEntry(
+            id=entry_id, user_id=user_id, timestamp=timestamp,
+            text=text, source=source, session_id=session_id,
+        )
 
     async def list_entries(self, user_id: str, limit: int = 100) -> list[JournalEntry]:
         await self._ensure_initialized()
@@ -89,6 +108,7 @@ class JournalStorage:
                 timestamp=row["timestamp"],
                 text=row["text"],
                 source=row["source"],
+                session_id=row["session_id"] if "session_id" in row.keys() else None,
             )
             for row in rows
         ]
