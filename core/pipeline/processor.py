@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from agents.reply_minimal import generate_reply
 from config import USE_LLM
+from core.context.builder import GraphContextBuilder
 from core.graph.api import GraphAPI
 from core.graph.model import Edge, Node
 from core.journal.storage import JournalStorage
@@ -63,6 +64,7 @@ class MessageProcessor:
         self.event_bus = event_bus or EventBus()
         self.mood_tracker = MoodTracker(graph_api.storage)
         self.parts_memory = PartsMemory(graph_api.storage)
+        self.context_builder = GraphContextBuilder(graph_api.storage)
 
     async def process_message(
         self,
@@ -112,6 +114,7 @@ class MessageProcessor:
 
         emotion_nodes = [node for node in created_nodes if node.type == "EMOTION"]
         mood_context = await self.mood_tracker.update(user_id, emotion_nodes)
+        graph_context = await self.context_builder.build(user_id)
 
         reply_text = generate_reply(
             text=text,
@@ -122,6 +125,7 @@ class MessageProcessor:
             },
             mood_context=mood_context,
             parts_context=parts_context,
+            graph_context=graph_context,
         )
 
         self.event_bus.publish(
