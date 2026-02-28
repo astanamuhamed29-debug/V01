@@ -167,6 +167,18 @@ class OpenRouterQwenClient:
         if graph_context and graph_context.get("session_conflict"):
             context_lines.append("Обнаружено внутреннее противоречие между ценностью и активной частью")
 
+        # --- Policy from OODA pipeline ---
+        policy = (graph_context or {}).get("policy", "REFLECT")
+        context_lines.append(f"Политика ответа: {policy}")
+
+        # --- Retrieved similar past experiences from Qdrant ---
+        retrieved = (graph_context or {}).get("retrieved_context", [])
+        if retrieved:
+            for i, item in enumerate(retrieved[:2]):
+                snippet = str(item)[:120] if item else ""
+                if snippet:
+                    context_lines.append(f"Похожий опыт #{i+1}: {snippet}")
+
         if mood_context:
             label = mood_context.get("dominant_label")
             d = mood_context.get("dominance_avg", 0)
@@ -195,12 +207,26 @@ class OpenRouterQwenClient:
 
         context_block = "\n".join(context_lines) if context_lines else "Первое обращение пользователя."
 
-        user_payload = (
-            f"Intent: {intent}\n"
-            f"Сообщение: {user_text}\n\n"
-            f"Контекст:\n{context_block}\n\n"
-            "Ответь пользователю."
-        )
+        # --- Session conversation history ---
+        session_ctx = (graph_context or {}).get("session_context", [])
+        history_block = ""
+        if session_ctx:
+            history_lines = []
+            for msg in session_ctx[-6:]:
+                role_label = "Пользователь" if msg.get("role") == "user" else "Ты"
+                history_lines.append(f"{role_label}: {msg.get('text', '')}")
+            history_block = "\n".join(history_lines)
+
+        user_payload_parts = [
+            f"Intent: {intent}",
+            f"Сообщение: {user_text}",
+            "",
+            f"Контекст:\n{context_block}",
+        ]
+        if history_block:
+            user_payload_parts.append(f"\nИстория диалога (последние реплики):\n{history_block}")
+        user_payload_parts.append("\nОтветь пользователю.")
+        user_payload = "\n".join(user_payload_parts)
 
         client = self._get_client()
         if client is None:
