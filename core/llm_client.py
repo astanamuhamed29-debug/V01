@@ -5,8 +5,15 @@ import os
 from typing import Any
 from typing import Protocol
 
+from dotenv import load_dotenv
+
 from config import LLM_MODEL_ID
 from core.llm.prompts import SYSTEM_PROMPT_EXTRACTOR
+
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class LLMClient(Protocol):
@@ -47,6 +54,7 @@ class MockLLMClient:
 
 class OpenRouterQwenClient:
     def __init__(self, *, api_key: str | None = None, model_id: str | None = None) -> None:
+        load_dotenv()
         self.api_key = api_key or os.getenv("OPENROUTER_API_KEY", "")
         self.model_id = model_id or LLM_MODEL_ID
         self.base_url = "https://openrouter.ai/api/v1"
@@ -115,6 +123,7 @@ class OpenRouterQwenClient:
     async def _chat_json(self, payload: dict[str, Any]) -> str:
         client = self._get_client()
         if client is None:
+            logger.warning("LLM client unavailable, skipping API call")
             return ""
 
         try:
@@ -141,12 +150,14 @@ class OpenRouterQwenClient:
 
         if not self.api_key:
             self._client_init_error = "OPENROUTER_API_KEY is not set"
+            logger.error("OpenRouterQwenClient: OPENROUTER_API_KEY is not set — LLM disabled")
             return None
 
         try:
             from openai import AsyncOpenAI
         except Exception:
             self._client_init_error = "openai package is not installed"
+            logger.error("OpenRouterQwenClient: openai package missing — LLM disabled")
             return None
 
         self._client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)

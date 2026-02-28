@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 
 from aiogram import Bot, Dispatcher, F, Router
@@ -41,6 +42,8 @@ async def run_bot() -> None:
 
 
 def main() -> None:
+    log_level = os.getenv("SELFOS_LOG_LEVEL", "INFO").upper()
+    logging.basicConfig(level=getattr(logging, log_level, logging.INFO))
     asyncio.run(run_bot())
 
 
