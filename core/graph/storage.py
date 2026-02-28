@@ -223,7 +223,14 @@ class GraphStorage:
             )
             existing = await cursor.fetchone()
             if existing:
-                return await self.get_edge(existing["id"])
+                return Edge(
+                    id=existing["id"],
+                    user_id=edge.user_id,
+                    source_node_id=edge.source_node_id,
+                    target_node_id=edge.target_node_id,
+                    relation=edge.relation,
+                    metadata=edge.metadata,
+                )
 
             await conn.execute(
                 """

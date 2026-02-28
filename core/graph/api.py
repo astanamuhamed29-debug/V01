@@ -100,6 +100,20 @@ class GraphAPI:
             candidate = node
 
             if node.key:
+                node = Node(
+                    id=node.id,
+                    user_id=node.user_id,
+                    type=node.type,
+                    name=node.name,
+                    text=node.text,
+                    subtype=node.subtype,
+                    key=normalize_key(node.key),
+                    metadata=node.metadata,
+                    created_at=node.created_at,
+                )
+                candidate = node
+
+            if node.key:
                 existing = await self.storage.find_by_key(user_id, node.type, node.key)
                 if existing:
                     candidate = Node(

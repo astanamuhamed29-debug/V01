@@ -86,3 +86,79 @@ def test_apply_changes_dedups_nodes_by_key_and_edges(tmp_path):
         assert len(own_edges) == 1
 
     asyncio.run(scenario())
+
+
+def test_normalize_key_dedup(tmp_path):
+    async def scenario() -> None:
+        db_path = tmp_path / "test.db"
+        api = GraphAPI(GraphStorage(db_path=db_path))
+
+        node1 = Node(
+            id="n-key-1",
+            user_id="me",
+            type="PROJECT",
+            name="SELF-OS",
+            key="project:SELF-OS",
+        )
+        node2 = Node(
+            id="n-key-2",
+            user_id="me",
+            type="PROJECT",
+            name="SELF-OS",
+            key="project:self-os",
+        )
+
+        await api.apply_changes("me", [node1, node2], [])
+
+        projects = [node for node in await api.get_user_nodes_by_type("me", "PROJECT") if node.key == "project:self-os"]
+        assert len(projects) == 1
+
+    asyncio.run(scenario())
+
+
+def test_edge_dedup(tmp_path):
+    async def scenario() -> None:
+        db_path = tmp_path / "test.db"
+        api = GraphAPI(GraphStorage(db_path=db_path))
+        person = await api.ensure_person_node("me")
+
+        project = Node(
+            id="proj-1",
+            user_id="me",
+            type="PROJECT",
+            name="SELF-OS",
+            key="project:self-os",
+        )
+        edge = Edge(
+            user_id="me",
+            source_node_id=person.id,
+            target_node_id=project.id,
+            relation="OWNS_PROJECT",
+        )
+
+        await api.apply_changes("me", [project], [edge])
+
+        project_again = Node(
+            id="proj-2",
+            user_id="me",
+            type="PROJECT",
+            name="SELF-OS",
+            key="project:self-os",
+        )
+        edge_again = Edge(
+            user_id="me",
+            source_node_id=person.id,
+            target_node_id=project_again.id,
+            relation="OWNS_PROJECT",
+        )
+        await api.apply_changes("me", [project_again], [edge_again])
+
+        subgraph = await api.get_subgraph("me", ["PERSON", "PROJECT"])
+        own_edges = [
+            item
+            for item in subgraph["edges"]
+            if item.source_node_id == person.id and item.relation == "OWNS_PROJECT"
+        ]
+        assert len(own_edges) == 1
+
+    asyncio.run(scenario())
