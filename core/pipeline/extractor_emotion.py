@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 
 from core.graph.model import Edge, Node
 
@@ -64,11 +65,12 @@ async def extract(user_id: str, text: str, intent: str, person_id: str) -> tuple
         emotions = [("neutral", 0.0, 0.0, 0.0, 0.5)]
 
     emotion_nodes: list[Node] = []
+    today = date.today().isoformat()
     for label, valence, arousal, dominance, intensity in emotions:
         emotion = Node(
             user_id=user_id,
             type="EMOTION",
-            key=None,
+            key=f"emotion:{label}:{today}",
             metadata={
                 "valence": valence,
                 "arousal": arousal,

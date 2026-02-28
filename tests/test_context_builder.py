@@ -10,12 +10,15 @@ def test_build_empty(tmp_path):
         storage = GraphStorage(db_path=tmp_path / "test.db")
         builder = GraphContextBuilder(storage)
 
-        context = await builder.build("u_empty")
+        try:
+            context = await builder.build("u_empty")
 
-        assert context["has_history"] is False
-        assert context["active_projects"] == []
-        assert context["recurring_emotions"] == []
-        assert context["known_parts"] == []
+            assert context["has_history"] is False
+            assert context["active_projects"] == []
+            assert context["recurring_emotions"] == []
+            assert context["known_parts"] == []
+        finally:
+            await storage.close()
 
     asyncio.run(scenario())
 
@@ -25,24 +28,27 @@ def test_build_with_emotions(tmp_path):
         storage = GraphStorage(db_path=tmp_path / "test.db")
         builder = GraphContextBuilder(storage)
 
-        await storage.upsert_node(
+        try:
+            await storage.upsert_node(
             Node(user_id="u1", type="EMOTION", metadata={"label": "стыд", "valence": -0.6, "arousal": -0.2})
-        )
-        await storage.upsert_node(
+            )
+            await storage.upsert_node(
             Node(user_id="u1", type="EMOTION", metadata={"label": "стыд", "valence": -0.5, "arousal": -0.1})
-        )
-        await storage.upsert_node(
+            )
+            await storage.upsert_node(
             Node(user_id="u1", type="EMOTION", metadata={"label": "стыд", "valence": -0.7, "arousal": -0.3})
-        )
-        await storage.upsert_node(
+            )
+            await storage.upsert_node(
             Node(user_id="u1", type="EMOTION", metadata={"label": "тревога", "valence": -0.4, "arousal": 0.3})
-        )
+            )
 
-        context = await builder.build("u1")
-        shame = next((item for item in context["recurring_emotions"] if item["label"] == "стыд"), None)
+            context = await builder.build("u1")
+            shame = next((item for item in context["recurring_emotions"] if item["label"] == "стыд"), None)
 
-        assert shame is not None
-        assert shame["count"] == 3
+            assert shame is not None
+            assert shame["count"] == 3
+        finally:
+            await storage.close()
 
     asyncio.run(scenario())
 
@@ -52,7 +58,8 @@ def test_build_mood_trend_declining(tmp_path):
         storage = GraphStorage(db_path=tmp_path / "test.db")
         builder = GraphContextBuilder(storage)
 
-        await storage.save_mood_snapshot(
+        try:
+            await storage.save_mood_snapshot(
             {
                 "id": "s1",
                 "user_id": "u2",
@@ -64,8 +71,8 @@ def test_build_mood_trend_declining(tmp_path):
                 "dominant_label": "нейтрально",
                 "sample_count": 1,
             }
-        )
-        await storage.save_mood_snapshot(
+            )
+            await storage.save_mood_snapshot(
             {
                 "id": "s2",
                 "user_id": "u2",
@@ -77,8 +84,8 @@ def test_build_mood_trend_declining(tmp_path):
                 "dominant_label": "нейтрально",
                 "sample_count": 1,
             }
-        )
-        await storage.save_mood_snapshot(
+            )
+            await storage.save_mood_snapshot(
             {
                 "id": "s3",
                 "user_id": "u2",
@@ -90,8 +97,8 @@ def test_build_mood_trend_declining(tmp_path):
                 "dominant_label": "стыд",
                 "sample_count": 2,
             }
-        )
-        await storage.save_mood_snapshot(
+            )
+            await storage.save_mood_snapshot(
             {
                 "id": "s4",
                 "user_id": "u2",
@@ -103,10 +110,12 @@ def test_build_mood_trend_declining(tmp_path):
                 "dominant_label": "стыд",
                 "sample_count": 2,
             }
-        )
+            )
 
-        context = await builder.build("u2")
-        assert context["mood_trend"] == "declining"
+            context = await builder.build("u2")
+            assert context["mood_trend"] == "declining"
+        finally:
+            await storage.close()
 
     asyncio.run(scenario())
 
@@ -116,7 +125,8 @@ def test_build_with_parts(tmp_path):
         storage = GraphStorage(db_path=tmp_path / "test.db")
         builder = GraphContextBuilder(storage)
 
-        await storage.upsert_node(
+        try:
+            await storage.upsert_node(
             Node(
                 user_id="u3",
                 type="PART",
@@ -125,8 +135,8 @@ def test_build_with_parts(tmp_path):
                 key="part:critic",
                 metadata={"appearances": 5, "voice": "Ты снова подвёл."},
             )
-        )
-        await storage.upsert_node(
+            )
+            await storage.upsert_node(
             Node(
                 user_id="u3",
                 type="PART",
@@ -135,13 +145,15 @@ def test_build_with_parts(tmp_path):
                 key="part:firefighter",
                 metadata={"appearances": 2, "voice": "Я тушу напряжение."},
             )
-        )
+            )
 
-        context = await builder.build("u3")
+            context = await builder.build("u3")
 
-        assert context["known_parts"]
-        assert context["known_parts"][0]["key"] == "part:critic"
-        assert context["known_parts"][0]["appearances"] >= context["known_parts"][1]["appearances"]
+            assert context["known_parts"]
+            assert context["known_parts"][0]["key"] == "part:critic"
+            assert context["known_parts"][0]["appearances"] >= context["known_parts"][1]["appearances"]
+        finally:
+            await storage.close()
 
     asyncio.run(scenario())
 
@@ -151,7 +163,8 @@ def test_build_with_values(tmp_path):
         storage = GraphStorage(db_path=tmp_path / "test.db")
         builder = GraphContextBuilder(storage)
 
-        await storage.upsert_node(
+        try:
+            await storage.upsert_node(
             Node(
                 user_id="u4",
                 type="VALUE",
@@ -160,11 +173,13 @@ def test_build_with_values(tmp_path):
                 text="в чем польза",
                 metadata={"appearances": 2},
             )
-        )
+            )
 
-        context = await builder.build("u4")
+            context = await builder.build("u4")
 
-        assert context["known_values"]
-        assert context["known_values"][0]["key"] == "value:польза"
+            assert context["known_values"]
+            assert context["known_values"][0]["key"] == "value:польза"
+        finally:
+            await storage.close()
 
     asyncio.run(scenario())

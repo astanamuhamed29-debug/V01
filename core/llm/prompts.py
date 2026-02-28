@@ -25,7 +25,7 @@ SCHEMA:
 
 ПРАВИЛА УЗЛОВ:
 - relation используй только из списка: HAS_VALUE, HOLDS_BELIEF, OWNS_PROJECT, HAS_TASK, RELATES_TO, DESCRIBES_EVENT, FEELS, EMOTION_ABOUT, EXPRESSED_AS, HAS_PART, TRIGGERED_BY, PROTECTS, CONFLICTS_WITH, SUPPORTS
-- EMOTION: обязательно metadata.label, metadata.valence (-1..1), metadata.arousal (-1..1), metadata.dominance (-1..1, контроль над ситуацией: злость=+0.7, стыд=-0.5, страх=-0.6, радость=+0.4), metadata.intensity (0..1, сила эмоции)
+- EMOTION: обязательно metadata.label, metadata.valence (-1..1), metadata.arousal (-1..1), metadata.dominance (-1..1, контроль над ситуацией: злость=+0.7, стыд=-0.5, страх=-0.6, радость=+0.4), metadata.intensity (0..1, сила эмоции), key = "emotion:<label>:<YYYY-MM-DD>" (дата сегодня, например "emotion:стыд:2026-02-28")
 - "между X и Y" или "X и Y" при перечислении эмоций → два отдельных EMOTION-узла
 - SOMA: metadata.location (часть тела), metadata.sensation (ощущение)
 - PART: subtype = "critic"|"protector"|"exile"|"manager"|"firefighter"|"inner_child"

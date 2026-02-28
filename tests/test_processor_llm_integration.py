@@ -87,13 +87,16 @@ def test_processor_parses_fenced_llm_json_into_graph(tmp_path):
         llm_client = FencedLLMClient()
         processor = MessageProcessor(graph_api=api, journal=journal, llm_client=llm_client, use_llm=True)
 
-        await processor.process_message(user_id="me", text="тест", source="cli")
+        try:
+            await processor.process_message(user_id="me", text="тест", source="cli")
 
-        assert llm_client.extract_all_calls == 1
-        assert len(await api.get_user_nodes_by_type("me", "PROJECT")) == 1
-        assert len(await api.get_user_nodes_by_type("me", "BELIEF")) == 1
-        assert len(await api.get_user_nodes_by_type("me", "EMOTION")) == 1
-        assert len(await api.get_user_nodes_by_type("me", "SOMA")) == 1
+            assert llm_client.extract_all_calls == 1
+            assert len(await api.get_user_nodes_by_type("me", "PROJECT")) == 1
+            assert len(await api.get_user_nodes_by_type("me", "BELIEF")) == 1
+            assert len(await api.get_user_nodes_by_type("me", "EMOTION")) == 1
+            assert len(await api.get_user_nodes_by_type("me", "SOMA")) == 1
+        finally:
+            await api.storage.close()
 
     asyncio.run(scenario())
 
@@ -105,13 +108,16 @@ def test_processor_does_not_crash_on_bad_llm_json(tmp_path):
         journal = JournalStorage(db_path=db_path)
         processor = MessageProcessor(graph_api=api, journal=journal, llm_client=BrokenLLMClient(), use_llm=True)
 
-        result = await processor.process_message(
-            user_id="me",
-            text="Я боюсь, что не вывезу проект SELF-OS.",
-            source="cli",
-        )
+        try:
+            result = await processor.process_message(
+                user_id="me",
+                text="Я боюсь, что не вывезу проект SELF-OS.",
+                source="cli",
+            )
 
-        assert result.intent in {"REFLECTION", "FEELING_REPORT"}
-        assert len(await api.get_user_nodes_by_type("me", "NOTE")) >= 1
+            assert result.intent in {"REFLECTION", "FEELING_REPORT"}
+            assert len(await api.get_user_nodes_by_type("me", "NOTE")) >= 1
+        finally:
+            await api.storage.close()
 
     asyncio.run(scenario())

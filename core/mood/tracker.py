@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
-from uuid import uuid4
+from datetime import date, datetime, timezone
 
 from core.graph.model import Node
 from core.graph.storage import GraphStorage
@@ -37,9 +36,10 @@ class MoodTracker:
         labels = [str(n.metadata.get("label", "")) for n in recent if n.metadata.get("label")]
 
         dominant_label = max(set(labels), key=labels.count) if labels else None
+        today = date.today().isoformat()
 
         snapshot = {
-            "id": str(uuid4()),
+            "id": f"{user_id}:{today}",
             "user_id": user_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "valence_avg": round(sum(valences) / len(valences), 3),

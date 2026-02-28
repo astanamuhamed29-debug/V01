@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from uuid import uuid4
 
 from agents.reply_minimal import generate_reply
@@ -83,13 +84,27 @@ class MessageProcessor:
         intent = router.classify(text)
 
         person = await self.graph_api.ensure_person_node(user_id)
+        graph_context = await self.context_builder.build(user_id)
 
-        nodes, edges, llm_intent, graph_context = await self._extract_via_llm_all(
-            user_id=user_id,
-            text=text,
-            intent=intent,
-            person_id=person.id,
+        self.live_reply_enabled = os.getenv("LIVE_REPLY_ENABLED", "true").lower() == "true"
+        extract_task = asyncio.create_task(
+            self._extract_via_llm_all(
+                user_id=user_id,
+                text=text,
+                intent=intent,
+                person_id=person.id,
+                graph_context=graph_context,
+            )
         )
+        live_reply_task = asyncio.create_task(
+            self._generate_live_reply_safe(
+                text=text,
+                intent=intent,
+                graph_context=graph_context,
+            )
+        )
+
+        (nodes, edges, llm_intent), live_reply_preliminary = await asyncio.gather(extract_task, live_reply_task)
         if llm_intent in router.INTENTS:
             if llm_intent == "REFLECTION" and intent != "REFLECTION":
                 pass
@@ -144,9 +159,8 @@ class MessageProcessor:
             graph_context=graph_context,
         )
 
-        live_reply_enabled = os.getenv("LIVE_REPLY_ENABLED", "true").lower() == "true"
-        final_reply = reply_text
-        if live_reply_enabled:
+        final_reply = live_reply_preliminary
+        if not final_reply.strip() and self.live_reply_enabled:
             live_reply = ""
             try:
                 live_reply = await self.llm_client.generate_live_reply(
@@ -159,8 +173,9 @@ class MessageProcessor:
             except Exception as exc:
                 logger.warning("live_reply failed, using template: %s", exc)
 
-            if live_reply:
-                final_reply = live_reply
+            final_reply = live_reply if live_reply and live_reply.strip() else reply_text
+        elif not final_reply.strip():
+            final_reply = reply_text
 
         self.event_bus.publish(
             "pipeline.processed",
@@ -196,8 +211,8 @@ class MessageProcessor:
         text: str,
         intent: str,
         person_id: str,
-    ) -> tuple[list[Node], list[Edge], str | None, dict]:
-        graph_context = await self.context_builder.build(user_id)
+        graph_context: dict,
+    ) -> tuple[list[Node], list[Edge], str | None]:
         if self.use_llm:
             try:
                 graph_hints = {
@@ -238,7 +253,7 @@ class MessageProcessor:
                     if llm_intent == "REFLECTION" and router.classify(text) == "FEELING_REPORT":
                         logger.warning("LLM downgraded emotion intent to REFLECTION, using fallback")
                         raise ValueError("llm intent downgrade")
-                    return llm_nodes, llm_edges, llm_intent, graph_context
+                    return llm_nodes, llm_edges, llm_intent
             except Exception as exc:
                 logger.warning("Failed LLM extract_all path: %s", exc)
 
@@ -249,8 +264,22 @@ class MessageProcessor:
             [*semantic_nodes, *parts_nodes, *emotion_nodes],
             [*semantic_edges, *parts_edges, *emotion_edges],
             None,
-            graph_context,
         )
+
+    async def _generate_live_reply_safe(self, text: str, intent: str, graph_context: dict) -> str:
+        if not self.live_reply_enabled:
+            return ""
+        try:
+            return await self.llm_client.generate_live_reply(
+                user_text=text,
+                intent=intent,
+                mood_context=None,
+                parts_context=None,
+                graph_context=graph_context,
+            )
+        except Exception as exc:
+            logger.warning("live_reply_safe failed: %s", exc)
+            return ""
 
     def _is_minimal_payload(self, payload: dict | str) -> bool:
         if not payload:
@@ -322,6 +351,10 @@ class MessageProcessor:
                 key=raw_node.get("key"),
                 metadata=metadata,
             )
+            if node.type == "EMOTION" and not node.key:
+                label = str(node.metadata.get("label", "unknown"))
+                today = date.today().isoformat()
+                node.key = f"emotion:{label}:{today}"
             nodes.append(node)
             ref_map[temp_id] = node.id
 

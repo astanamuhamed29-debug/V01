@@ -14,15 +14,18 @@ def test_mood_snapshots_and_trend_reply(tmp_path):
         journal = JournalStorage(db_path=db_path)
         processor = MessageProcessor(graph_api=api, journal=journal, use_llm=False)
 
-        text = "Устал и злюсь на себя за прокрастинацию."
-        replies: list[str] = []
-        for _ in range(3):
-            result = await processor.process(user_id="test_user", text=text, source="cli")
-            replies.append(result.reply_text)
+        try:
+            text = "Устал и злюсь на себя за прокрастинацию."
+            replies: list[str] = []
+            for _ in range(3):
+                result = await processor.process(user_id="test_user", text=text, source="cli")
+                replies.append(result.reply_text)
 
-        snapshots = await storage.get_mood_snapshots("test_user", limit=3)
+            snapshots = await storage.get_mood_snapshots("test_user", limit=3)
 
-        assert len(snapshots) == 3
-        assert "Замечаю, что" in replies[-1] or "Фиксирую нарастающее напряжение." in replies[-1]
+            assert len(snapshots) == 1
+            assert "Замечаю, что" in replies[-1] or "Фиксирую нарастающее напряжение." in replies[-1]
+        finally:
+            await storage.close()
 
     asyncio.run(scenario())

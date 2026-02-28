@@ -13,32 +13,35 @@ def test_milestone_scenario_builds_expected_graph(tmp_path):
         journal = JournalStorage(db_path=db_path)
         processor = MessageProcessor(graph_api=api, journal=journal)
 
-        messages = [
-            "Хочу сделать свою личную ОС SELF-OS.",
-            "Надо выделить вечер, чтобы набросать архитектуру.",
-            "Я боюсь, что не вывезу такой большой проект.",
-        ]
+        try:
+            messages = [
+                "Хочу сделать свою личную ОС SELF-OS.",
+                "Надо выделить вечер, чтобы набросать архитектуру.",
+                "Я боюсь, что не вывезу такой большой проект.",
+            ]
 
-        for text in messages:
-            await processor.process_message(user_id="me", text=text, source="cli")
+            for text in messages:
+                await processor.process_message(user_id="me", text=text, source="cli")
 
-        notes = await api.get_user_nodes_by_type("me", "NOTE")
-        projects = await api.get_user_nodes_by_type("me", "PROJECT")
-        tasks = await api.get_user_nodes_by_type("me", "TASK")
-        beliefs = await api.get_user_nodes_by_type("me", "BELIEF")
+            notes = await api.get_user_nodes_by_type("me", "NOTE")
+            projects = await api.get_user_nodes_by_type("me", "PROJECT")
+            tasks = await api.get_user_nodes_by_type("me", "TASK")
+            beliefs = await api.get_user_nodes_by_type("me", "BELIEF")
 
-        assert len(notes) == 3
-        assert len(projects) == 1
-        assert projects[0].name == "SELF-OS"
-        assert len(tasks) >= 1
-        assert any("набросать архитектуру" in (task.text or "") for task in tasks)
-        assert len(beliefs) == 1
+            assert len(notes) == 3
+            assert len(projects) == 1
+            assert projects[0].name == "SELF-OS"
+            assert len(tasks) >= 1
+            assert any("набросать архитектуру" in (task.text or "") for task in tasks)
+            assert len(beliefs) == 1
 
-        edges = await api.storage.list_edges("me")
-        relations = {edge.relation for edge in edges}
-        assert "OWNS_PROJECT" in relations
-        assert "HAS_TASK" in relations
-        assert "HOLDS_BELIEF" in relations
+            edges = await api.storage.list_edges("me")
+            relations = {edge.relation for edge in edges}
+            assert "OWNS_PROJECT" in relations
+            assert "HAS_TASK" in relations
+            assert "HOLDS_BELIEF" in relations
+        finally:
+            await api.storage.close()
 
     asyncio.run(scenario())
 
@@ -50,9 +53,12 @@ def test_relocation_phrase_creates_relocation_project(tmp_path):
         journal = JournalStorage(db_path=db_path)
         processor = MessageProcessor(graph_api=api, journal=journal)
 
-        await processor.process(user_id="321", text="Привет, я хочу переехать", source="telegram")
+        try:
+            await processor.process(user_id="321", text="Привет, я хочу переехать", source="telegram")
 
-        projects = await api.get_user_nodes_by_type("321", "PROJECT")
-        assert any((project.name or "").lower() == "переезд" for project in projects)
+            projects = await api.get_user_nodes_by_type("321", "PROJECT")
+            assert any((project.name or "").lower() == "переезд" for project in projects)
+        finally:
+            await api.storage.close()
 
     asyncio.run(scenario())

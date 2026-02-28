@@ -20,13 +20,16 @@ def test_first_appearance(tmp_path):
             metadata={"voice": "Ты снова подвёл."},
         )
 
-        saved = await memory.register_appearance("me", part)
-        history = await memory.get_part_history("me", "part:critic")
+        try:
+            saved = await memory.register_appearance("me", part)
+            history = await memory.get_part_history("me", "part:critic")
 
-        assert saved["appearances"] == 1
-        assert saved["first_seen"]
-        assert saved["part"] is not None
-        assert history["appearances"] == 1
+            assert saved["appearances"] == 1
+            assert saved["first_seen"]
+            assert saved["part"] is not None
+            assert history["appearances"] == 1
+        finally:
+            await storage.close()
 
     asyncio.run(scenario())
 
@@ -36,7 +39,8 @@ def test_repeated_appearance(tmp_path):
         storage = GraphStorage(db_path=tmp_path / "test.db")
         memory = PartsMemory(storage)
 
-        first = Node(
+        try:
+            first = Node(
             user_id="me",
             type="PART",
             subtype="critic",
@@ -45,9 +49,9 @@ def test_repeated_appearance(tmp_path):
             text="Ненавижу себя",
             metadata={"voice": "Ты снова подвёл."},
         )
-        saved_first = await memory.register_appearance("me", first)
+            saved_first = await memory.register_appearance("me", first)
 
-        second = Node(
+            second = Node(
             user_id="me",
             type="PART",
             subtype="critic",
@@ -56,11 +60,13 @@ def test_repeated_appearance(tmp_path):
             text="Снова не сделал",
             metadata={"voice": "Ты снова подвёл."},
         )
-        saved_second = await memory.register_appearance("me", second)
+            saved_second = await memory.register_appearance("me", second)
 
-        assert saved_second["appearances"] == 2
-        assert saved_second["first_seen"] == saved_first["first_seen"]
-        assert saved_second["last_seen"] != saved_first["last_seen"]
+            assert saved_second["appearances"] == 2
+            assert saved_second["first_seen"] == saved_first["first_seen"]
+            assert saved_second["last_seen"] != saved_first["last_seen"]
+        finally:
+            await storage.close()
 
     asyncio.run(scenario())
 
@@ -70,7 +76,8 @@ def test_get_known_parts(tmp_path):
         storage = GraphStorage(db_path=tmp_path / "test.db")
         memory = PartsMemory(storage)
 
-        await memory.register_appearance(
+        try:
+            await memory.register_appearance(
             "me",
             Node(
                 user_id="me",
@@ -81,8 +88,8 @@ def test_get_known_parts(tmp_path):
                 text="Текст критика",
                 metadata={"voice": "Ты снова подвёл."},
             ),
-        )
-        await memory.register_appearance(
+            )
+            await memory.register_appearance(
             "me",
             Node(
                 user_id="me",
@@ -93,12 +100,14 @@ def test_get_known_parts(tmp_path):
                 text="Залип в игры",
                 metadata={"voice": "Я пытаюсь снять напряжение."},
             ),
-        )
+            )
 
-        parts = await memory.get_known_parts("me")
-        keys = {part.key for part in parts}
+            parts = await memory.get_known_parts("me")
+            keys = {part.key for part in parts}
 
-        assert "part:critic" in keys
-        assert "part:firefighter" in keys
+            assert "part:critic" in keys
+            assert "part:firefighter" in keys
+        finally:
+            await storage.close()
 
     asyncio.run(scenario())
