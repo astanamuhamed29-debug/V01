@@ -35,6 +35,7 @@ SYSTEM_PROMPT_EXTRACTOR = """
 - TRIGGERED_BY
 - PROTECTS
 - CONFLICTS_WITH
+- SUPPORTS
 
 ФОРМАТ ОТВЕТА (СТРОГО):
 {
@@ -54,7 +55,7 @@ SYSTEM_PROMPT_EXTRACTOR = """
     {
       "source_node_id": "temp_node_id_or_person:me",
       "target_node_id": "temp_node_id",
-      "relation": "HAS_VALUE|HOLDS_BELIEF|OWNS_PROJECT|HAS_TASK|RELATES_TO|DESCRIBES_EVENT|FEELS|EMOTION_ABOUT|EXPRESSED_AS|HAS_PART|TRIGGERED_BY|PROTECTS|CONFLICTS_WITH",
+      "relation": "HAS_VALUE|HOLDS_BELIEF|OWNS_PROJECT|HAS_TASK|RELATES_TO|DESCRIBES_EVENT|FEELS|EMOTION_ABOUT|EXPRESSED_AS|HAS_PART|TRIGGERED_BY|PROTECTS|CONFLICTS_WITH|SUPPORTS",
       "metadata": {}
     }
   ]
@@ -103,6 +104,28 @@ SYSTEM_PROMPT_EXTRACTOR = """
   "edges": [
     {"source_node_id": "person:me", "target_node_id": "n1", "relation": "HAS_TASK"},
     {"source_node_id": "person:me", "target_node_id": "n2", "relation": "FEELS"}
+  ]
+}
+
+Пример 3 (вход):
+"Сегодня весь день откладывал работу над SELF-OS, залип в игры. Чувствую что-то между стыдом и усталостью."
+
+Пример 3 (выход):
+{
+  "intent": "FEELING_REPORT",
+  "nodes": [
+    {"id": "n1", "type": "PROJECT", "name": "SELF-OS", "key": "project:self-os"},
+    {"id": "n2", "type": "EVENT", "text": "откладывал работу весь день", "key": "event:прокрастинация"},
+    {"id": "n3", "type": "EMOTION", "metadata": {"valence": -0.7, "arousal": -0.2, "label": "стыд"}},
+    {"id": "n4", "type": "EMOTION", "metadata": {"valence": -0.5, "arousal": -0.4, "label": "усталость"}}
+  ],
+  "edges": [
+    {"source_node_id": "person:me", "target_node_id": "n1", "relation": "OWNS_PROJECT"},
+    {"source_node_id": "person:me", "target_node_id": "n2", "relation": "DESCRIBES_EVENT"},
+    {"source_node_id": "person:me", "target_node_id": "n3", "relation": "FEELS"},
+    {"source_node_id": "person:me", "target_node_id": "n4", "relation": "FEELS"},
+    {"source_node_id": "n3", "target_node_id": "n1", "relation": "EMOTION_ABOUT"},
+    {"source_node_id": "n2", "target_node_id": "n3", "relation": "TRIGGERED_BY"}
   ]
 }
 """.strip()

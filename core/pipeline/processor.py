@@ -146,7 +146,7 @@ class MessageProcessor:
         if self.use_llm:
             try:
                 logger.info("LLM extract_all call")
-                payload = await self.llm_client.extract_all(text, intent)
+                payload = await self.llm_client.extract_all(text, "UNKNOWN")
                 logger.info("LLM raw response: %s", repr(payload))
                 if self._is_minimal_payload(payload):
                     logger.warning("LLM returned minimal/empty payload, using fallback")

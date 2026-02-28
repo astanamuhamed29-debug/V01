@@ -92,7 +92,6 @@ class OpenRouterQwenClient:
         payload = {
             "task": "extract_all",
             "text": text,
-            "intent": intent,
         }
         raw = await self._chat_json(payload)
         if not raw:
