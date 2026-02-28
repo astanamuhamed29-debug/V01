@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
+from datetime import datetime, timezone
 
+from core.analytics.pattern_analyzer import PatternAnalyzer, PatternReport
 from core.graph.storage import GraphStorage
 
 logger = logging.getLogger(__name__)
@@ -11,6 +13,7 @@ logger = logging.getLogger(__name__)
 class GraphContextBuilder:
     def __init__(self, storage: GraphStorage) -> None:
         self.storage = storage
+        self.pattern_analyzer = PatternAnalyzer(storage)
 
     async def build(self, user_id: str) -> dict:
         """
@@ -80,6 +83,49 @@ class GraphContextBuilder:
             "total_messages": total_messages,
             "has_history": total_known > 5,
         }
+
+        try:
+            pattern_report = await self.pattern_analyzer.analyze(user_id, days=30)
+        except Exception as exc:
+            logger.warning("PatternAnalyzer failed for user=%s: %s", user_id, exc)
+            pattern_report = PatternReport(
+                user_id=user_id,
+                generated_at=datetime.now(timezone.utc).isoformat(),
+                trigger_patterns=[],
+                need_profile=[],
+                cognition_patterns=[],
+                part_dynamics=[],
+                mood_snapshots_count=0,
+                has_enough_data=False,
+            )
+
+        context["pattern_report"] = pattern_report
+        context["top_needs"] = [
+            {"name": item.need_name, "count": item.total_signals}
+            for item in pattern_report.need_profile[:3]
+        ]
+        context["top_distortions"] = [
+            {"distortion": item.distortion_ru, "count": item.count}
+            for item in pattern_report.cognition_patterns[:2]
+        ]
+        context["trigger_patterns"] = [
+            {
+                "source": item.source_text[:40],
+                "target": item.target_name,
+                "count": item.occurrences,
+            }
+            for item in pattern_report.trigger_patterns[:3]
+        ]
+        context["part_dynamics"] = [
+            {
+                "name": item.part_name,
+                "appearances": item.appearances,
+                "trend": item.trend,
+                "dominant_need": item.dominant_need,
+            }
+            for item in pattern_report.part_dynamics[:3]
+        ]
+
         logger.debug(
             "GraphContext built: projects=%d parts=%d emotions=%d",
             len(active_projects),

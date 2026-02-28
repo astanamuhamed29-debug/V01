@@ -455,6 +455,50 @@ class GraphStorage:
         rows = await cursor.fetchall()
         return [_row_to_edge(row) for row in rows]
 
+    async def get_edges_by_relation(self, user_id: str, relation: str) -> list[Edge]:
+        """Все рёбра пользователя с указанным relation. Быстрее чем list_edges + filter."""
+        # NOTE: added storage method get_edges_by_relation for performance.
+        await self._ensure_initialized()
+        conn = await self._get_conn()
+        cursor = await conn.execute(
+            "SELECT * FROM edges WHERE user_id = ? AND relation = ? ORDER BY created_at",
+            (user_id, relation),
+        )
+        rows = await cursor.fetchall()
+        return [_row_to_edge(row) for row in rows]
+
+    async def get_edges_to_node(self, user_id: str, target_node_id: str) -> list[Edge]:
+        """Все рёбра входящие в указанный узел."""
+        await self._ensure_initialized()
+        conn = await self._get_conn()
+        cursor = await conn.execute(
+            "SELECT * FROM edges WHERE user_id = ? AND target_node_id = ?",
+            (user_id, target_node_id),
+        )
+        rows = await cursor.fetchall()
+        return [_row_to_edge(row) for row in rows]
+
+    async def get_edges_from_node(self, user_id: str, source_node_id: str) -> list[Edge]:
+        """Все рёбра исходящие из указанного узла."""
+        await self._ensure_initialized()
+        conn = await self._get_conn()
+        cursor = await conn.execute(
+            "SELECT * FROM edges WHERE user_id = ? AND source_node_id = ?",
+            (user_id, source_node_id),
+        )
+        rows = await cursor.fetchall()
+        return [_row_to_edge(row) for row in rows]
+
+    async def count_nodes(self, user_id: str) -> int:
+        """Общее количество узлов пользователя."""
+        await self._ensure_initialized()
+        conn = await self._get_conn()
+        cursor = await conn.execute(
+            "SELECT COUNT(*) FROM nodes WHERE user_id = ?", (user_id,)
+        )
+        row = await cursor.fetchone()
+        return int(row[0]) if row else 0
+
 
 def _row_to_node(row: aiosqlite.Row) -> Node:
     return Node(
