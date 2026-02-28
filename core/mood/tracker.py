@@ -17,15 +17,7 @@ class MoodTracker:
 
     async def update(self, user_id: str, new_emotion_nodes: list[Node]) -> dict | None:
         """Вызывается после каждого process(). Считает снапшот и сохраняет."""
-        all_emotions = await self.storage.find_nodes(user_id=user_id, node_type="EMOTION")
-        if not all_emotions:
-            return None
-
-        recent = sorted(
-            all_emotions,
-            key=lambda n: n.metadata.get("created_at") or n.created_at,
-            reverse=True,
-        )[:WINDOW]
+        recent = await self.storage.find_nodes_recent(user_id=user_id, node_type="EMOTION", limit=WINDOW)
         if not recent:
             return None
 

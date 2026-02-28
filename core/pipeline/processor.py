@@ -41,6 +41,19 @@ ALLOWED_EDGE_RELATIONS = {
     "SUPPORTS",
 }
 
+# Конфигурируемые правила валидации LLM-ответа
+# Формат: (regex_pattern_or_None, required_node_type, required_key_or_None, error_msg)
+LLM_VALIDATION_RULES: list[tuple] = [
+    # (текстовый паттерн, тип узла, key узла или None, сообщение об ошибке)
+    (None, "VALUE", None, "meta without value"),
+    (r"\b(более\s+жив\w*|живым)\b", "VALUE", None, "missing value node"),
+]
+
+# Отдельно — intent-зависимые правила (intent → требуемый тип)
+LLM_INTENT_RULES: dict[str, str] = {
+    "META": "VALUE",
+}
+
 
 @dataclass(slots=True)
 class ProcessResult:
@@ -67,6 +80,7 @@ class MessageProcessor:
         self.mood_tracker = MoodTracker(graph_api.storage)
         self.parts_memory = PartsMemory(graph_api.storage)
         self.context_builder = GraphContextBuilder(graph_api.storage)
+        self.live_reply_enabled: bool = os.getenv("LIVE_REPLY_ENABLED", "true").lower() == "true"
 
     async def process_message(
         self,
@@ -86,7 +100,6 @@ class MessageProcessor:
         person = await self.graph_api.ensure_person_node(user_id)
         graph_context = await self.context_builder.build(user_id)
 
-        self.live_reply_enabled = os.getenv("LIVE_REPLY_ENABLED", "true").lower() == "true"
         extract_task = asyncio.create_task(
             self._extract_via_llm_all(
                 user_id=user_id,
@@ -160,22 +173,15 @@ class MessageProcessor:
         )
 
         final_reply = live_reply_preliminary
-        if not final_reply.strip() and self.live_reply_enabled:
-            live_reply = ""
-            try:
-                live_reply = await self.llm_client.generate_live_reply(
-                    user_text=text,
-                    intent=intent,
-                    mood_context=mood_context,
-                    parts_context=parts_context,
-                    graph_context=graph_context,
-                )
-            except Exception as exc:
-                logger.warning("live_reply failed, using template: %s", exc)
-
+        if not final_reply.strip():
+            live_reply = await self._generate_live_reply_safe(
+                text=text,
+                intent=intent,
+                graph_context=graph_context,
+                mood_context=mood_context,
+                parts_context=parts_context,
+            )
             final_reply = live_reply if live_reply and live_reply.strip() else reply_text
-        elif not final_reply.strip():
-            final_reply = reply_text
 
         self.event_bus.publish(
             "pipeline.processed",
@@ -236,18 +242,27 @@ class MessageProcessor:
                 logger.info("LLM mapped: nodes=%d edges=%d", len(llm_nodes), len(llm_edges))
                 if llm_nodes or llm_edges:
                     base_intent = router.classify(text)
-                    has_value = any(node.type == "VALUE" for node in llm_nodes)
-                    has_critic = any(node.type == "PART" and node.key == "part:critic" for node in llm_nodes)
                     lowered = text.lower()
-                    if base_intent == "META" and not has_value:
-                        logger.warning("LLM META response without VALUE node, using fallback")
-                        raise ValueError("meta without value")
-                    if "не нравится" in lowered and not has_critic:
-                        logger.warning("LLM response missed critic part on 'не нравится', using fallback")
-                        raise ValueError("missing critic part")
-                    if re.search(r"\b(более\s+жив\w*|живым)\b", lowered) and not has_value:
-                        logger.warning("LLM response missed VALUE on authenticity phrase, using fallback")
-                        raise ValueError("missing value node")
+
+                    required_type = LLM_INTENT_RULES.get(base_intent)
+                    if required_type:
+                        has_required = any(node.type == required_type for node in llm_nodes)
+                        if not has_required:
+                            logger.warning("LLM %s response missing required %s node", base_intent, required_type)
+                            raise ValueError(f"missing {required_type} for {base_intent}")
+
+                    for pattern, req_type, req_key, err_msg in LLM_VALIDATION_RULES:
+                        if pattern is None and base_intent != "META":
+                            continue
+                        if pattern and not re.search(pattern, lowered):
+                            continue
+                        has_required = any(
+                            node.type == req_type and (req_key is None or node.key == req_key)
+                            for node in llm_nodes
+                        )
+                        if not has_required:
+                            logger.warning("LLM validation failed: %s", err_msg)
+                            raise ValueError(err_msg)
 
                     llm_intent = str(parsed.get("intent", "")).upper()
                     if llm_intent == "REFLECTION" and router.classify(text) == "FEELING_REPORT":
@@ -266,15 +281,22 @@ class MessageProcessor:
             None,
         )
 
-    async def _generate_live_reply_safe(self, text: str, intent: str, graph_context: dict) -> str:
+    async def _generate_live_reply_safe(
+        self,
+        text: str,
+        intent: str,
+        graph_context: dict,
+        mood_context: dict | None = None,
+        parts_context: list[dict] | None = None,
+    ) -> str:
         if not self.live_reply_enabled:
             return ""
         try:
             return await self.llm_client.generate_live_reply(
                 user_text=text,
                 intent=intent,
-                mood_context=None,
-                parts_context=None,
+                mood_context=mood_context,
+                parts_context=parts_context,
                 graph_context=graph_context,
             )
         except Exception as exc:

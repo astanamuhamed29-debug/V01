@@ -344,6 +344,27 @@ class GraphStorage:
         rows = await cursor.fetchall()
         return [_row_to_node(row) for row in rows]
 
+    async def find_nodes_recent(
+        self,
+        user_id: str,
+        node_type: str,
+        limit: int = 5,
+    ) -> list[Node]:
+        """Возвращает limit последних узлов по created_at DESC — через SQL, без Python sort."""
+        await self._ensure_initialized()
+        conn = await self._get_conn()
+        cursor = await conn.execute(
+            """
+            SELECT * FROM nodes
+            WHERE user_id = ? AND type = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (user_id, node_type, limit),
+        )
+        rows = await cursor.fetchall()
+        return [_row_to_node(row) for row in rows]
+
     async def find_by_key(self, user_id: str, node_type: str, key: str) -> Node | None:
         await self._ensure_initialized()
 
