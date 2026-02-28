@@ -1,3 +1,5 @@
+import logging
+
 from core.llm.parser import is_minimal_payload, map_payload_to_graph, parse_json_payload
 
 
@@ -28,3 +30,17 @@ def test_map_filters_unknown_type():
     nodes, edges = map_payload_to_graph(user_id="u1", person_id="p1", data=data)
     assert nodes == []
     assert edges == []
+
+
+def test_parser_with_reasoning_block(caplog):
+    raw = (
+        '{"_reasoning":{"situation":"конфликт на работе","appraisal":"меня не слышат",'
+        '"affect":"злость","defenses":"критик","core_needs":"уважение"},'
+        '"intent":"FEELING_REPORT","nodes":[],"edges":[]}'
+    )
+    with caplog.at_level(logging.DEBUG):
+        data = parse_json_payload(raw)
+
+    assert data["intent"] == "FEELING_REPORT"
+    assert "_reasoning" in data
+    assert "Extractor reasoning block" in caplog.text

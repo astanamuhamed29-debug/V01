@@ -5,11 +5,24 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import date
+from typing import TypedDict
 from uuid import uuid4
 
 from core.graph.model import Edge, Node
+
+
+logger = logging.getLogger(__name__)
+
+
+class ReasoningBlock(TypedDict, total=False):
+    situation: str
+    appraisal: str
+    affect: str
+    defenses: str
+    core_needs: str
 
 
 ALLOWED_NODE_TYPES = {
@@ -67,6 +80,7 @@ def is_minimal_payload(payload: dict | str) -> bool:
 def parse_json_payload(payload: dict | str) -> dict:
     """Парсит LLM JSON, включая fenced blocks и <think> теги."""
     if isinstance(payload, dict):
+        _log_reasoning_block(payload)
         return payload
 
     cleaned = payload.strip()
@@ -82,11 +96,16 @@ def parse_json_payload(payload: dict | str) -> dict:
     if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
         cleaned = cleaned[first_brace : last_brace + 1]
 
-    return json.loads(cleaned)
+    data = json.loads(cleaned)
+    if isinstance(data, dict):
+        _log_reasoning_block(data)
+    return data
 
 
 def map_payload_to_graph(*, user_id: str, person_id: str, data: dict) -> tuple[list[Node], list[Edge]]:
     """Преобразует распарсенный LLM-ответ в узлы и рёбра графа."""
+    _log_reasoning_block(data)
+
     raw_nodes = data.get("nodes", [])
     raw_edges = data.get("edges", [])
     if not isinstance(raw_nodes, list) or not isinstance(raw_edges, list):
@@ -160,3 +179,18 @@ def map_payload_to_graph(*, user_id: str, person_id: str, data: dict) -> tuple[l
         )
 
     return nodes, edges
+
+
+def _log_reasoning_block(data: dict) -> None:
+    reasoning = data.get("_reasoning")
+    if not isinstance(reasoning, dict):
+        return
+
+    normalized: ReasoningBlock = {
+        "situation": str(reasoning.get("situation", "")).strip(),
+        "appraisal": str(reasoning.get("appraisal", "")).strip(),
+        "affect": str(reasoning.get("affect", "")).strip(),
+        "defenses": str(reasoning.get("defenses", "")).strip(),
+        "core_needs": str(reasoning.get("core_needs", "")).strip(),
+    }
+    logger.debug("Extractor reasoning block: %s", normalized)
