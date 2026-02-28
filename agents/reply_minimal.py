@@ -92,6 +92,7 @@ def generate_reply(
 
     emotions = [node for node in nodes if node.type == "EMOTION"]
     tasks = [node for node in nodes if node.type == "TASK"]
+    thoughts = [node for node in nodes if node.type == "THOUGHT"]
     beliefs = [node for node in nodes if node.type == "BELIEF"]
     projects = [node for node in nodes if node.type == "PROJECT"]
     events = [node for node in nodes if node.type == "EVENT"]
@@ -125,6 +126,13 @@ def generate_reply(
             name = idea_nodes[0].name or "идея"
             return f"Интересная идея: «{name[:80]}». Сохранил в SELF-Graph.{parts_note}{history_note}{conflict_note}"
         return f"Записал идею. Хочешь развить?{parts_note}{history_note}{conflict_note}"
+
+    if thoughts:
+        thought_text = thoughts[0].text or thoughts[0].name or ""
+        triggers = [e for e in edges if e.relation == "TRIGGERS" and e.source_node_id == thoughts[0].id]
+        if triggers:
+            return f"Зафиксировал мысль: «{thought_text[:80]}» и её последствия.{parts_note}{history_note}{conflict_note}"
+        return f"Зафиксировал мысль: «{thought_text[:80]}».{parts_note}{history_note}{conflict_note}"
 
     if beliefs:
         belief_text = beliefs[0].text or beliefs[0].name or ""
