@@ -64,6 +64,15 @@ User Message
 
 ---
 
+## Документация
+
+| Документ | Описание |
+|---|---|
+| [`docs/FRONTIER_VISION_REPORT.md`](docs/FRONTIER_VISION_REPORT.md) | Архитектурная дорожная карта SELF-OS: эволюция от Stage 1 (Passive Knowledge Graph) до Stage 5 (Autonomous Predictive Cognitive System) |
+| [`deploy/VPS_DEPLOY.md`](deploy/VPS_DEPLOY.md) | Пошаговый деплой на VPS |
+
+---
+
 ## Запуск CLI
 
 ```bash
