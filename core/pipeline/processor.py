@@ -105,11 +105,13 @@ class MessageProcessor:
         )
 
         (nodes, edges, llm_intent), live_reply_preliminary = await asyncio.gather(extract_task, live_reply_task)
-        if llm_intent in router.INTENTS:
-            if llm_intent == "REFLECTION" and intent != "REFLECTION":
+        if llm_intent and llm_intent in router.INTENTS:
+            if intent in {"UNKNOWN", "REFLECTION"}:
+                intent = llm_intent
+            elif intent == "META":
                 pass
-            elif intent == "META" and llm_intent != "META":
-                pass
+            elif llm_intent == "FEELING_REPORT" and intent in {"EVENT_REPORT", "REFLECTION"}:
+                intent = llm_intent
             else:
                 intent = llm_intent
 
@@ -166,9 +168,10 @@ class MessageProcessor:
         emotion_nodes = [node for node in created_nodes if node.type == "EMOTION"]
         mood_context = await self.mood_tracker.update(user_id, emotion_nodes)
 
+        effective_intent = intent if intent != "UNKNOWN" else "REFLECTION"
         reply_text = generate_reply(
             text=text,
-            intent=intent,
+            intent=effective_intent,
             extracted_structures={
                 "nodes": [*created_nodes],
                 "edges": [*created_edges],
@@ -283,6 +286,7 @@ class MessageProcessor:
         person_id: str,
         graph_context: dict,
     ) -> tuple[list[Node], list[Edge], str | None]:
+        REGEX_UNCERTAIN = {"UNKNOWN", "REFLECTION"}
         if self.use_llm:
             try:
                 graph_hints = {
@@ -306,6 +310,8 @@ class MessageProcessor:
                 logger.info("LLM mapped: nodes=%d edges=%d", len(llm_nodes), len(llm_edges))
                 if llm_nodes or llm_edges:
                     base_intent = router.classify(text)
+                    if base_intent in REGEX_UNCERTAIN:
+                        base_intent = "UNKNOWN"
                     lowered = text.lower()
 
                     required_type = LLM_INTENT_RULES.get(base_intent)

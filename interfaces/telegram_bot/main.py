@@ -41,8 +41,12 @@ async def handle_report_message(message: Message, processor: MessageProcessor) -
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
     await message.answer(
-        "Привет. Я SELF-OS — твой личный граф.\n"
-        "Просто напиши что думаешь или чувствуешь."
+        "Привет. Я SELF-OS.\n\n"
+        "Пиши мне всё что думаешь, чувствуешь, планируешь.\n"
+        "На любом языке — русском, английском, вперемешку.\n\n"
+        "Я буду слушать, замечать паттерны\n"
+        "и отражать что происходит внутри.\n\n"
+        "Начни прямо сейчас."
     )
 
 

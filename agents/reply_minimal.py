@@ -119,6 +119,13 @@ def generate_reply(
             return f"Принято: «{first_task}». Добавил в SELF-Graph как задачу.{parts_note}{history_note}{conflict_note}"
         return f"Принято. Задача добавлена в SELF-Graph.{parts_note}{history_note}{conflict_note}"
 
+    if intent == "IDEA":
+        idea_nodes = [n for n in nodes if n.type in ("NOTE", "PROJECT", "VALUE")]
+        if idea_nodes:
+            name = idea_nodes[0].name or "идея"
+            return f"Интересная идея: «{name[:80]}». Сохранил в SELF-Graph.{parts_note}{history_note}{conflict_note}"
+        return f"Записал идею. Хочешь развить?{parts_note}{history_note}{conflict_note}"
+
     if beliefs:
         belief_text = beliefs[0].text or beliefs[0].name or ""
         return f"Зафиксировал убеждение: «{belief_text[:80]}».{parts_note}{history_note}{conflict_note}"
@@ -134,4 +141,4 @@ def generate_reply(
     if nodes:
         return f"Записал. Продолжай, я накапливаю структуру твоего SELF-Graph.{parts_note}{history_note}{conflict_note}"
 
-    return ""
+    return f"Слышу тебя. Записал в SELF-Graph.{parts_note}{history_note}{conflict_note}"
