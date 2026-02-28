@@ -21,7 +21,11 @@ def _extract_task_text(text: str) -> str:
     if match:
         return match.group(1).strip(" .,!?:;")
 
-    cleaned = re.sub(r"^(надо|нужно|хочу|сделать)\s+", "", text.strip(), flags=re.IGNORECASE)
+    match = re.search(r"\b(?:сделай|слеоай)\s+(.+)$", text, flags=re.IGNORECASE)
+    if match:
+        return match.group(1).strip(" .,!?:;")
+
+    cleaned = re.sub(r"^(надо|нужно|хочу|сделать|сделай|слеоай)\s+", "", text.strip(), flags=re.IGNORECASE)
     return cleaned.strip(" .,!?:;")
 
 
@@ -91,7 +95,7 @@ async def extract(user_id: str, text: str, intent: str, person_id: str) -> tuple
             )
         )
 
-    if intent == "TASK_LIKE" or re.search(r"\b(надо|нужно|сделать|хочу)\b", text, flags=re.IGNORECASE):
+    if intent == "TASK_LIKE" or re.search(r"\b(надо|нужно|сделать|сделай|слеоай|хочу)\b", text, flags=re.IGNORECASE):
         task_text = _extract_task_text(text)
         task = Node(
             user_id=user_id,

@@ -29,6 +29,7 @@ cases = [
     ("why should i use this", "META"),
     ("feeling грусть сегодня", "FEELING_REPORT"),
     ("надо сделать todo list", "TASK_LIKE"),
+    ("https://plati.market/itm/google-ai-pro-6-months-antigravity-gemini-3-1-nano-banana-pro-veo-3-1/5669298 слеоай кропию дизайна", "TASK_LIKE"),
 ]
 
 
