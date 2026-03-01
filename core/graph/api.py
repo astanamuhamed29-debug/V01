@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import sqlite3
 
 from core.graph.model import Edge, Node
 from core.graph.storage import GraphStorage
@@ -89,7 +90,7 @@ class GraphAPI:
                 metadata=metadata or {},
             )
             return await self.storage.add_edge(edge)
-        except Exception as exc:
+        except (ValueError, sqlite3.Error) as exc:
             logging.getLogger(__name__).warning(
                 "create_edge failed %s→%s [%s]: %s",
                 source_node_id,

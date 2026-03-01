@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 
-from core.pipeline.processor import MessageProcessor
 from interfaces.processor_factory import build_processor
 
 

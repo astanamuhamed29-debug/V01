@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from config import (
     DB_PATH as _DEFAULT_DB_PATH,
     QDRANT_API_KEY,
@@ -15,6 +17,8 @@ from core.llm.embedding_service import EmbeddingService
 from core.llm_client import OpenRouterQwenClient
 from core.pipeline.processor import MessageProcessor
 from core.search.qdrant_storage import QdrantVectorStorage
+
+logger = logging.getLogger(__name__)
 
 
 class _NoopQdrant:
@@ -38,7 +42,8 @@ def build_processor(db_path: str | None = None) -> MessageProcessor:
             client = get_client()
             if client is not None:
                 embedding_service = EmbeddingService(client)
-    except Exception:
+    except Exception as exc:
+        logger.warning("EmbeddingService init failed, disabling: %s", exc)
         embedding_service = None
 
     try:
@@ -47,7 +52,8 @@ def build_processor(db_path: str | None = None) -> MessageProcessor:
             api_key=QDRANT_API_KEY or None,
             collection_name=QDRANT_COLLECTION,
         )
-    except Exception:
+    except Exception as exc:
+        logger.warning("Qdrant connection failed, using NoopQdrant: %s", exc)
         qdrant = _NoopQdrant()
 
     session_memory = SessionMemory()

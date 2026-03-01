@@ -34,11 +34,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-CHECK_INTERVAL: int = 3600
-MIN_INTERVAL_HOURS: int = 20
-INACTIVITY_DAYS: int = 7
-SIGNAL_THRESHOLD: float = 0.4
-MIN_DATA_NODES: int = 10
+from core.defaults import (
+    PROACTIVE_CHECK_INTERVAL as CHECK_INTERVAL,
+    PROACTIVE_MIN_INTERVAL_HOURS as MIN_INTERVAL_HOURS,
+    PROACTIVE_INACTIVITY_DAYS as INACTIVITY_DAYS,
+    PROACTIVE_SIGNAL_THRESHOLD as SIGNAL_THRESHOLD,
+    PROACTIVE_MIN_DATA_NODES as MIN_DATA_NODES,
+    PROACTIVE_SILENCE_BREAK_DAYS,
+)
 
 
 @dataclass(slots=True)
@@ -204,7 +207,7 @@ class SignalDetector:
         if not report.last_activity_at:
             return None
         last_activity = _parse_iso(report.last_activity_at)
-        if datetime.now(timezone.utc) - last_activity < timedelta(days=3):
+        if datetime.now(timezone.utc) - last_activity < timedelta(days=PROACTIVE_SILENCE_BREAK_DAYS):
             return None
 
         return ProactiveSignal(

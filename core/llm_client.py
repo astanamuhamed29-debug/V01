@@ -6,6 +6,7 @@ from typing import Any
 from typing import Protocol
 
 from dotenv import load_dotenv
+from openai import OpenAIError
 
 from config import LLM_MODEL_ID
 from core.llm.prompts import SYSTEM_PROMPT_EXTRACTOR
@@ -253,7 +254,7 @@ class OpenRouterQwenClient:
                     },
                 ],
             )
-        except Exception as exc:
+        except OpenAIError as exc:
             logger.error("generate_live_reply failed: %s", exc)
             return ""
 
@@ -304,7 +305,8 @@ class OpenRouterQwenClient:
                     {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
                 ],
             )
-        except Exception:
+        except OpenAIError as exc:
+            logger.exception("LLM extract_all API call failed: %s", exc)
             return ""
 
         usage = getattr(completion, "usage", None)
@@ -333,7 +335,7 @@ class OpenRouterQwenClient:
 
         try:
             from openai import AsyncOpenAI
-        except Exception:
+        except ImportError:
             self._client_init_error = "openai package is not installed"
             logger.error("OpenRouterQwenClient: openai package missing — LLM disabled")
             return None

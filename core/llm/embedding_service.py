@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
 
+from openai import OpenAIError
+
 logger = logging.getLogger(__name__)
 
 EMBEDDING_MODEL = "text-embedding-3-small"
@@ -50,7 +52,7 @@ class EmbeddingService:
             embedding = response.data[0].embedding
             self._set_cached(text, embedding)
             return embedding
-        except Exception as exc:
+        except OpenAIError as exc:
             logger.warning("EmbeddingService.embed_text failed: %s", exc)
             return None
 
@@ -90,7 +92,7 @@ class EmbeddingService:
                 embedding = emb_obj.embedding
                 result[node_id] = embedding
                 self._set_cached(uncached_texts[idx], embedding)
-        except Exception as exc:
+        except OpenAIError as exc:
             logger.warning("EmbeddingService.embed_nodes batch failed: %s", exc)
 
         return result

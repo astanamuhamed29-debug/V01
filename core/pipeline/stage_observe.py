@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from config import MAX_TEXT_LENGTH
 from core.context.session_memory import SessionMemory
+from core.defaults import SESSION_GAP_MINUTES
 from core.journal.storage import JournalStorage
 from core.pipeline import router
 from core.pipeline.events import EventBus
@@ -45,7 +46,7 @@ class ObserveStage:
         journal: JournalStorage,
         session_memory: SessionMemory,
         event_bus: EventBus,
-        session_gap: timedelta = timedelta(minutes=30),
+        session_gap: timedelta = timedelta(minutes=SESSION_GAP_MINUTES),
     ) -> None:
         self.journal = journal
         self.session_memory = session_memory

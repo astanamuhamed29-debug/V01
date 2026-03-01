@@ -5,6 +5,7 @@ from collections import Counter
 from datetime import datetime, timezone
 
 from core.analytics.pattern_analyzer import PatternAnalyzer, PatternReport
+from core.defaults import MOOD_TREND_DELTA
 from core.graph.storage import GraphStorage
 from core.llm.embedding_service import EmbeddingService
 
@@ -153,8 +154,8 @@ class GraphContextBuilder:
         recent_avg = sum(s.get("valence_avg", 0) for s in snapshots[:2]) / 2
         older_avg = sum(s.get("valence_avg", 0) for s in snapshots[2:]) / max(len(snapshots[2:]), 1)
         delta = recent_avg - older_avg
-        if delta < -0.15:
+        if delta < -MOOD_TREND_DELTA:
             return "declining"
-        if delta > 0.15:
+        if delta > MOOD_TREND_DELTA:
             return "improving"
         return "stable"

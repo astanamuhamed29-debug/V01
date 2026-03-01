@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 import os
 
-from agents.reply_minimal import generate_reply
+from core.pipeline.reply_minimal import generate_reply
 from core.context.session_memory import SessionMemory
 from core.graph.model import Edge, Node
 from core.llm_client import LLMClient

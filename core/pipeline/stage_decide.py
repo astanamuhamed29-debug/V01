@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 
+from core.defaults import DECIDE_LOW_VALENCE_THRESHOLD, DECIDE_PATTERN_SCORE_THRESHOLD
 from core.graph.api import GraphAPI
 from core.graph.model import Edge, Node
 from core.mood.tracker import MoodTracker
@@ -63,7 +64,7 @@ class DecideStage:
         has_part = any(n.type == "PART" for n in created_nodes)
         has_value = any(n.type == "VALUE" for n in created_nodes)
         low_valence = any(
-            float(n.metadata.get("pad_v", n.metadata.get("valence", 0))) < -0.5
+            float(n.metadata.get("pad_v", n.metadata.get("valence", 0))) < DECIDE_LOW_VALENCE_THRESHOLD
             for n in created_nodes
             if n.type == "EMOTION"
         )
@@ -73,7 +74,7 @@ class DecideStage:
             policy = "IFS_RESOLVE"
         elif low_valence:
             policy = "VALIDATE"
-        elif top_score > 0.85:
+        elif top_score > DECIDE_PATTERN_SCORE_THRESHOLD:
             policy = "PATTERN_INSIGHT"
         else:
             policy = "REFLECT"

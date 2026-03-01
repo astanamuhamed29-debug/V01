@@ -25,15 +25,17 @@ from core.graph.storage import GraphStorage
 
 logger = logging.getLogger(__name__)
 
-# ── Configuration knobs ──────────────────────────────────────────
-CONSOLIDATION_RETENTION_THRESHOLD = 0.3
-CONSOLIDATION_SIMILARITY_THRESHOLD = 0.82
-CONSOLIDATION_MIN_CLUSTER_SIZE = 2
-FORGETTING_EDGE_THRESHOLD = 0.05
-FORGETTING_NODE_THRESHOLD = 0.1
-PROTECTED_TYPES = frozenset({"BELIEF", "NEED", "VALUE"})
-PROTECTED_REVIEW_MIN = 2
-MAX_ARCHETYPE_NAME_LENGTH = 120
+# ── Configuration knobs (centralised in core.defaults) ────────────
+from core.defaults import (
+    CONSOLIDATION_RETENTION_THRESHOLD,
+    CONSOLIDATION_SIMILARITY_THRESHOLD,
+    CONSOLIDATION_MIN_CLUSTER_SIZE,
+    FORGETTING_EDGE_THRESHOLD,
+    FORGETTING_NODE_THRESHOLD,
+    PROTECTED_TYPES,
+    PROTECTED_REVIEW_MIN,
+    MAX_ARCHETYPE_NAME_LENGTH,
+)
 
 
 @dataclass(slots=True)
@@ -281,19 +283,7 @@ class MemoryConsolidator:
 
 # Canonical implementation in core.utils.math
 from core.utils.math import cosine_similarity as _cosine_similarity  # noqa: E402
-
-
-def _mean_embedding(embeddings: list[list[float]]) -> list[float] | None:
-    """Average a list of equal-length embedding vectors."""
-    if not embeddings:
-        return None
-    dim = len(embeddings[0])
-    mean = [0.0] * dim
-    for emb in embeddings:
-        for i, v in enumerate(emb):
-            mean[i] += v
-    n = len(embeddings)
-    return [v / n for v in mean]
+from core.utils.math import mean_embedding as _mean_embedding  # noqa: E402
 
 
 def _cluster_by_embedding(

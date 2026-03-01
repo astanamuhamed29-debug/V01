@@ -18,7 +18,7 @@ Detected distortion types
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 __all__ = ["CognitiveDistortionDetector", "CognitiveDistortion"]
 
@@ -165,7 +165,7 @@ _PATTERNS: list[dict] = [
 ]
 
 # Pre-compile all patterns for performance
-_CONFIDENCE_BASELINE = 0.3  # Minimum confidence boost for any single pattern match
+from core.defaults import COGNITIVE_CONFIDENCE_BASELINE as _CONFIDENCE_BASELINE
 _COMPILED: list[dict] = [
     {
         **entry,

@@ -25,8 +25,7 @@ from core.graph.storage import GraphStorage
 logger = logging.getLogger(__name__)
 
 # Similarity band for potential contradictions
-CONTRA_SIM_LOW = 0.5
-CONTRA_SIM_HIGH = 0.75
+from core.defaults import CONTRA_SIM_LOW, CONTRA_SIM_HIGH
 
 
 @dataclass(slots=True)

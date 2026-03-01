@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import math
 from typing import Any, Literal
 from uuid import uuid4
+
+logger = logging.getLogger(__name__)
 
 
 NodeType = Literal[
@@ -114,7 +117,8 @@ def edge_weight(edge: Edge, half_life_days: float = 30.0) -> float:
         return 1.0
     try:
         created = datetime.fromisoformat(edge.created_at.replace("Z", "+00:00"))
-    except Exception:
+    except (ValueError, TypeError) as exc:
+        logger.warning("temporal_decay_weight date parse failed: %s", exc)
         return 1.0
     if created.tzinfo is None:
         created = created.replace(tzinfo=timezone.utc)

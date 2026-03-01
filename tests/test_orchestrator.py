@@ -1,10 +1,10 @@
-"""Tests for agents/orchestrator.py."""
+"""Tests for core/pipeline/orchestrator.py."""
 
 import asyncio
 
 import pytest
 
-from agents.orchestrator import (
+from core.pipeline.orchestrator import (
     AgentContext,
     AgentOrchestrator,
     AgentResult,

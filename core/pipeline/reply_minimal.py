@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 from core.graph.model import Node
+
+logger = logging.getLogger(__name__)
 from core.search.qdrant_storage import VectorSearchResult
 
 
@@ -59,7 +62,8 @@ def generate_reply(
                         12: "декабря",
                     }
                     date_str = f"{dt.day} {months_ru.get(dt.month, '')}".strip()
-                except Exception:
+                except (ValueError, TypeError) as exc:
+                    logger.debug("Date parse failed: %s", exc)
                     date_str = "ранее"
                 parts_note += f" Замечаю {name} — он появляется уже {appearances}-й раз (последний раз {date_str})."
             else:

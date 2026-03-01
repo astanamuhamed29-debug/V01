@@ -14,6 +14,7 @@ from core.graph.model import get_node_embedding
 from core.graph.storage import GraphStorage
 from core.utils.math import cosine_similarity as _cosine_similarity
 from core.llm.embedding_service import EmbeddingService
+from core.defaults import SYNDROME_DENSITY_MIN, IMPLICIT_LINK_PROBABILITY_MIN
 
 
 @dataclass(slots=True)
@@ -204,7 +205,8 @@ class PatternAnalyzer:
 
         try:
             communities = community.greedy_modularity_communities(graph, weight="weight")
-        except Exception:
+        except (nx.NetworkXError, ValueError) as exc:
+            logger.warning("greedy_modularity_communities failed: %s", exc)
             return []
 
         syndromes: list[Syndrome] = []
@@ -214,7 +216,7 @@ class PatternAnalyzer:
 
             subgraph = graph.subgraph(cluster)
             density = nx.density(subgraph)
-            if density < 0.4:
+            if density < SYNDROME_DENSITY_MIN:
                 continue
 
             node_names = [graph.nodes[node_id].get("name", "") for node_id in cluster]
@@ -248,12 +250,13 @@ class PatternAnalyzer:
 
         try:
             preds = nx.adamic_adar_index(graph)
-        except Exception:
+        except (nx.NetworkXError, ValueError) as exc:
+            logger.warning("adamic_adar_index failed: %s", exc)
             return []
 
         links: list[ImplicitLink] = []
         for source_id, target_id, probability in preds:
-            if probability < 1.5:
+            if probability < IMPLICIT_LINK_PROBABILITY_MIN:
                 continue
 
             source_data = graph.nodes[source_id]
