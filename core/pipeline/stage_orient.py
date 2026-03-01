@@ -1,14 +1,14 @@
 """OODA — ORIENT stage.
 
-Extracts structures via LLM/regex, persists to graph, embeds nodes,
-runs Qdrant similarity search, builds graph context.
+Вся экстракция структур идёт ТОЛЬКО через LLM.
+LLM анализирует текст по методологии → возвращает JSON → маппится в граф.
+Regex-экстракторы убраны: LLM пластичнее любого самописного парсера.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from typing import TYPE_CHECKING
 
 from core.context.builder import GraphContextBuilder
@@ -21,23 +21,13 @@ from core.llm.parser import (
     map_payload_to_graph,
     parse_json_payload,
 )
-from core.pipeline import extractor_emotion, extractor_parts, extractor_semantic, router
+from core.pipeline import extractor_emotion, router
 from core.search.qdrant_storage import QdrantVectorStorage, VectorSearchResult
 
 if TYPE_CHECKING:
     from core.context.session_memory import SessionMemory
 
 logger = logging.getLogger(__name__)
-
-# Validation rules — same as in original processor
-LLM_VALIDATION_RULES: list[tuple] = [
-    (None, "VALUE", None, "meta without value"),
-    (r"\b(более\s+жив\w*|живым)\b", "VALUE", None, "missing value node"),
-]
-
-LLM_INTENT_RULES: dict[str, str] = {
-    "META": "VALUE",
-}
 
 
 class OrientResult:
@@ -62,7 +52,7 @@ class OrientResult:
 
 
 class OrientStage:
-    """LLM/regex extraction → graph persistence → embedding → Qdrant search → context."""
+    """LLM extraction → graph persistence → embedding → Qdrant search → context."""
 
     def __init__(
         self,
@@ -71,7 +61,7 @@ class OrientStage:
         embedding_service: EmbeddingService | None,
         qdrant: QdrantVectorStorage,
         context_builder: GraphContextBuilder,
-        use_llm: bool,
+        use_llm: bool = True,
         session_memory: "SessionMemory | None" = None,
     ) -> None:
         self.graph_api = graph_api
@@ -79,7 +69,6 @@ class OrientStage:
         self.embedding_service = embedding_service
         self.qdrant = qdrant
         self.context_builder = context_builder
-        self.use_llm = use_llm
         self.session_memory = session_memory
 
     async def run(self, user_id: str, text: str, intent: str) -> OrientResult:
@@ -101,8 +90,14 @@ class OrientStage:
 
         intent = self._reconcile_intent(intent, llm_intent, text)
 
-        # ── Persist updated baseline back to PERSON node ─────────
+        # ── Обновить baseline из EMOTION-нод, полученных от LLM ─
         baseline = extractor_emotion.get_baseline(user_id)
+        for node in nodes:
+            if node.type == "EMOTION" and isinstance(node.metadata, dict):
+                v = float(node.metadata.get("valence", 0))
+                a = float(node.metadata.get("arousal", 0))
+                d = float(node.metadata.get("dominance", 0))
+                baseline.update(v, a, d)
         if baseline.sample_count > 0:
             person.metadata.update(baseline.to_dict())
             await self.graph_api.storage.upsert_node(person)
@@ -144,75 +139,44 @@ class OrientStage:
         person_id: str,
         graph_context: dict,
     ) -> tuple[list[Node], list[Edge], str | None]:
-        REGEX_UNCERTAIN = {"UNKNOWN", "REFLECTION"}
-        if self.use_llm:
-            try:
-                graph_hints = {
-                    "known_projects": graph_context.get("active_projects", [])[:3],
-                    "known_parts": [
-                        p["key"] for p in graph_context.get("known_parts", [])[:3] if p.get("key")
-                    ],
-                    "known_values": [
-                        v["key"] for v in graph_context.get("known_values", []) if v.get("key")
-                    ][:3],
-                }
+        """Вся экстракция — ТОЛЬКО через LLM.
 
-                logger.info("LLM extract_all call")
-                payload = await self.llm_client.extract_all(text, "UNKNOWN", graph_hints=graph_hints)
-                logger.info("LLM raw response: %s", repr(payload))
-                if is_minimal_payload(payload):
-                    logger.warning("LLM returned minimal/empty payload, using fallback")
-                    raise ValueError("minimal payload")
-                parsed = parse_json_payload(payload)
-                llm_nodes, llm_edges = map_payload_to_graph(user_id=user_id, person_id=person_id, data=parsed)
-                logger.info("LLM mapped: nodes=%d edges=%d", len(llm_nodes), len(llm_edges))
-                if llm_nodes or llm_edges:
-                    base_intent = router.classify(text)
-                    if base_intent in REGEX_UNCERTAIN:
-                        base_intent = "UNKNOWN"
-                    lowered = text.lower()
+        LLM анализирует текст по методологии Chain of Causality,
+        возвращает structured JSON с nodes/edges.
+        Если LLM недоступен — возвращаем пустой результат.
+        Regex-fallback убран: LLM пластичнее любого самописного парсера.
+        """
+        try:
+            graph_hints = {
+                "known_projects": graph_context.get("active_projects", [])[:3],
+                "known_parts": [
+                    p["key"] for p in graph_context.get("known_parts", [])[:3] if p.get("key")
+                ],
+                "known_values": [
+                    v["key"] for v in graph_context.get("known_values", []) if v.get("key")
+                ][:3],
+            }
 
-                    required_type = LLM_INTENT_RULES.get(base_intent)
-                    if required_type:
-                        has_required = any(node.type == required_type for node in llm_nodes)
-                        if not has_required:
-                            logger.warning("LLM %s response missing required %s node", base_intent, required_type)
-                            raise ValueError(f"missing {required_type} for {base_intent}")
+            logger.info("LLM extract_all вызов")
+            payload = await self.llm_client.extract_all(text, "UNKNOWN", graph_hints=graph_hints)
+            logger.info("LLM сырой ответ: %s", repr(payload))
 
-                    for pattern, req_type, req_key, err_msg in LLM_VALIDATION_RULES:
-                        if pattern is None and base_intent != "META":
-                            continue
-                        if pattern and not re.search(pattern, lowered):
-                            continue
-                        has_required = any(
-                            node.type == req_type and (req_key is None or node.key == req_key)
-                            for node in llm_nodes
-                        )
-                        if not has_required:
-                            logger.warning("LLM validation failed: %s", err_msg)
-                            raise ValueError(err_msg)
+            if is_minimal_payload(payload):
+                logger.info("LLM вернул минимальный ответ — текст не содержит сущностей")
+                return [], [], None
 
-                    llm_intent = str(parsed.get("intent", "")).upper()
-                    if llm_intent == "REFLECTION" and router.classify(text) == "FEELING_REPORT":
-                        logger.warning("LLM downgraded emotion intent to REFLECTION, using fallback")
-                        raise ValueError("llm intent downgrade")
-                    return llm_nodes, llm_edges, llm_intent
-            except Exception as exc:
-                logger.warning("Failed LLM extract_all path: %s", exc)
+            parsed = parse_json_payload(payload)
+            llm_nodes, llm_edges = map_payload_to_graph(
+                user_id=user_id, person_id=person_id, data=parsed,
+            )
+            logger.info("LLM маппинг: nodes=%d edges=%d", len(llm_nodes), len(llm_edges))
 
-        semantic_nodes, semantic_edges = await extractor_semantic.extract(user_id, text, intent, person_id)
-        parts_nodes, parts_edges = await extractor_parts.extract(user_id, text, intent, person_id)
-        emotion_nodes, emotion_edges = await extractor_emotion.extract(
-            user_id, text, intent, person_id,
-            session_memory=self.session_memory,
-            llm_client=self.llm_client,
-            embedding_service=self.embedding_service,
-        )
-        return (
-            [*semantic_nodes, *parts_nodes, *emotion_nodes],
-            [*semantic_edges, *parts_edges, *emotion_edges],
-            None,
-        )
+            llm_intent = str(parsed.get("intent", "")).upper() or None
+            return llm_nodes, llm_edges, llm_intent
+
+        except Exception as exc:
+            logger.error("LLM extract_all упал: %s — возвращаем пустой результат", exc)
+            return [], [], None
 
     async def _embed_and_save_nodes(self, nodes: list[Node]) -> None:
         if not self.embedding_service:

@@ -29,7 +29,7 @@ class _NoopQdrant:
         return []
 
 
-def build_processor(db_path: str | None = None) -> MessageProcessor:
+def build_processor(db_path: str | None = None, *, background_mode: bool = True) -> MessageProcessor:
     resolved = db_path or _DEFAULT_DB_PATH
     graph_storage = GraphStorage(db_path=resolved)
     graph_api = GraphAPI(graph_storage)
@@ -66,4 +66,5 @@ def build_processor(db_path: str | None = None) -> MessageProcessor:
         llm_client=llm_client,
         embedding_service=embedding_service,
         calibrator=calibrator,
+        background_mode=background_mode,
     )

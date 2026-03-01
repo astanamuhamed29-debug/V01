@@ -1,24 +1,32 @@
 """MessageProcessor — thin OODA orchestrator.
 
-Delegates to four stage modules:
-  OBSERVE → ORIENT → DECIDE → ACT
+Two modes of operation controlled by ``background_mode``:
+
+  **background_mode=True** (production/chat):
+    OBSERVE → reply from *existing* graph context → return fast.
+    ORIENT + DECIDE run asynchronously via ``asyncio.create_task``.
+
+  **background_mode=False** (tests / CLI / sync):
+    Classic sequential: OBSERVE → ORIENT → DECIDE → ACT.
 
 Each stage is a self-contained class with an ``async def run()`` method.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
-from config import USE_LLM
+from config import USE_LLM  # noqa: F401 — backward compat
 from core.context.builder import GraphContextBuilder
 from core.context.session_memory import SessionMemory
 from core.graph.api import GraphAPI
 from core.graph.model import Edge, Node
+from core.insights.engine import InsightEngine
 from core.journal.storage import JournalStorage
 from core.llm.embedding_service import EmbeddingService
 from core.llm_client import LLMClient, MockLLMClient
@@ -31,6 +39,8 @@ from core.pipeline.stage_decide import DecideStage
 from core.pipeline.stage_act import ActStage
 from core.pipeline.stage_observe import _sanitize_text  # noqa: F401 — backward compat
 from core.search.qdrant_storage import QdrantVectorStorage
+from core.tools.base import ToolRegistry
+from core.tools.memory_tools import build_default_tools
 
 if TYPE_CHECKING:
     from core.analytics.calibrator import ThresholdCalibrator
@@ -47,7 +57,12 @@ class ProcessResult:
 
 
 class MessageProcessor:
-    """Thin orchestrator: OBSERVE → ORIENT → DECIDE → ACT."""
+    """Thin orchestrator: OBSERVE → ORIENT → DECIDE → ACT.
+
+    In ``background_mode`` the heavy LLM extraction (ORIENT+DECIDE) is
+    deferred to a background ``asyncio.Task`` so that the user receives
+    a reply immediately based on the *already accumulated* graph context.
+    """
 
     def __init__(
         self,
@@ -58,16 +73,17 @@ class MessageProcessor:
         llm_client: LLMClient | None = None,
         embedding_service: EmbeddingService | None = None,
         calibrator: "ThresholdCalibrator | None" = None,
-        use_llm: bool | None = None,
+        use_llm: bool | None = None,  # backward compat, ignored
         event_bus: EventBus | None = None,
+        background_mode: bool = False,
     ) -> None:
         self.graph_api = graph_api
         self.journal = journal
         self.session_memory = session_memory
         self.calibrator = calibrator
+        self.background_mode = background_mode
         effective_llm = llm_client or MockLLMClient()
         effective_bus = event_bus or EventBus()
-        effective_use_llm = USE_LLM if use_llm is None else use_llm
 
         self.context_builder = GraphContextBuilder(graph_api.storage, embedding_service=embedding_service)
         self.pattern_analyzer = self.context_builder.pattern_analyzer
@@ -76,13 +92,19 @@ class MessageProcessor:
 
         # Expose for tests / external access
         self.llm_client = effective_llm
-        self.use_llm = effective_use_llm
         self.event_bus = effective_bus
         self.embedding_service = embedding_service
         self.qdrant = qdrant
         self.live_reply_enabled: bool = os.getenv("LIVE_REPLY_ENABLED", "true").lower() == "true"
 
         self._calibrator_loaded: set[str] = set()
+        self._pending_tasks: list[asyncio.Task] = []
+
+        # Insight engine — runs after every analysis pass
+        self._insight_engine = InsightEngine(graph_api=graph_api)
+
+        # Tool registry — tools are bound per-user in process_message
+        self.tool_registry = ToolRegistry()
 
         # Build OODA stages
         self._observe = ObserveStage(
@@ -96,7 +118,6 @@ class MessageProcessor:
             embedding_service=embedding_service,
             qdrant=qdrant,
             context_builder=self.context_builder,
-            use_llm=effective_use_llm,
             session_memory=session_memory,
         )
         self._decide = DecideStage(
@@ -133,7 +154,19 @@ class MessageProcessor:
         # 1. OBSERVE — sanitise, journal, session, classify
         obs = await self._observe.run(user_id, text, source=source, timestamp=timestamp)
 
-        # 2. ORIENT — extract, persist, embed, search, context
+        if self.background_mode:
+            return await self._process_background(user_id, obs)
+
+        return await self._process_sync(user_id, obs)
+
+    # ------------------------------------------------------------------
+    # Sync path (tests / CLI): OBSERVE → ORIENT → DECIDE → ACT
+    # ------------------------------------------------------------------
+
+    async def _process_sync(self, user_id: str, obs) -> ProcessResult:
+        """Full sequential pipeline — used in tests and sync CLI."""
+
+        # 2. ORIENT — LLM extract, graph persist, embed, search, context
         ori = await self._orient.run(user_id, obs.text, obs.intent)
 
         # 3. DECIDE — policy, task links, conflicts, mood
@@ -146,6 +179,19 @@ class MessageProcessor:
         )
 
         all_edges = [*ori.created_edges, *dec.created_edges]
+
+        # 3b. INSIGHT — detect cross-pattern insights from new + historical data
+        insight_nodes = await self._insight_engine.run(
+            user_id=user_id,
+            new_nodes=ori.created_nodes,
+            new_edges=all_edges,
+            graph_context=ori.graph_context,
+        )
+        if insight_nodes:
+            ori.graph_context["recent_insights"] = [
+                {"title": n.name, "description": n.text, "severity": n.metadata.get("severity", "info")}
+                for n in insight_nodes
+            ]
 
         # 4. ACT — reply, session memory, event
         act = await self._act.run(
@@ -167,6 +213,197 @@ class MessageProcessor:
             nodes=ori.created_nodes,
             edges=all_edges,
         )
+
+    # ------------------------------------------------------------------
+    # Background path (production chat): fast reply → background analysis
+    # ------------------------------------------------------------------
+
+    async def _process_background(self, user_id: str, obs) -> ProcessResult:
+        """Fast path: reply from existing context, extraction in background.
+
+        1. Build graph context from ALREADY EXTRACTED data (prev messages).
+        2. Get current mood snapshot (fast DB read).
+        3. Register per-user tools + inject tool descriptions into context.
+        4. Generate reply using existing context (1 LLM call).
+        5. Spawn background task for: ORIENT + DECIDE + INSIGHT.
+        """
+
+        # ── Existing context (fast, no LLM) ──────────────────────
+        graph_context = await self.context_builder.build(user_id)
+        mood_context = await self.mood_tracker.get_current(user_id)
+        parts_context = graph_context.get("known_parts", [])[:3]
+
+        # ── Register per-user tools ──────────────────────────────
+        self._register_user_tools(user_id)
+        graph_context["available_tools"] = self.tool_registry.schemas_compact()
+
+        # ── Include recent insights in context ───────────────────
+        recent_insights = await self._load_recent_insights(user_id)
+        if recent_insights:
+            graph_context["recent_insights"] = recent_insights
+
+        # ── ACT — reply based on accumulated memory ──────────────
+        act = await self._act.run(
+            user_id=user_id,
+            text=obs.text,
+            intent=obs.intent,
+            created_nodes=[],
+            created_edges=[],
+            graph_context=graph_context,
+            mood_context=mood_context or {},
+            parts_context=parts_context,
+            retrieved_context=[],
+            policy="REFLECT",
+        )
+
+        # ── Handle tool calls in reply ───────────────────────────
+        final_reply = await self._handle_tool_calls(
+            user_id=user_id,
+            reply_text=act.reply_text,
+            text=obs.text,
+            intent=obs.intent,
+            graph_context=graph_context,
+            mood_context=mood_context or {},
+            parts_context=parts_context,
+        )
+
+        # ── Background: heavy LLM extraction + analysis ──────────
+        task = asyncio.create_task(
+            self._background_analysis(user_id, obs.text, obs.intent),
+        )
+        self._pending_tasks.append(task)
+
+        return ProcessResult(
+            intent=obs.intent,
+            reply_text=final_reply,
+            nodes=[],
+            edges=[],
+        )
+
+    async def _background_analysis(
+        self, user_id: str, text: str, intent: str,
+    ) -> None:
+        """ORIENT + DECIDE + INSIGHT in background — enriches graph without blocking chat."""
+        try:
+            ori = await self._orient.run(user_id, text, intent)
+            dec = await self._decide.run(
+                user_id=user_id,
+                created_nodes=ori.created_nodes,
+                created_edges=ori.created_edges,
+                retrieved_context=ori.retrieved_context,
+                graph_context=ori.graph_context,
+            )
+
+            all_edges = [*ori.created_edges, *dec.created_edges]
+
+            # Run insight engine on freshly extracted data
+            insight_nodes = await self._insight_engine.run(
+                user_id=user_id,
+                new_nodes=ori.created_nodes,
+                new_edges=all_edges,
+                graph_context=ori.graph_context,
+            )
+
+            logger.info(
+                "BG analysis done: nodes=%d edges=%d policy=%s insights=%d",
+                len(ori.created_nodes),
+                len(all_edges),
+                dec.policy,
+                len(insight_nodes),
+            )
+        except Exception as exc:
+            logger.error("Background analysis failed: %s", exc)
+
+    async def flush_pending(self) -> None:
+        """Await all background tasks. Call in tests / shutdown."""
+        if self._pending_tasks:
+            await asyncio.gather(*self._pending_tasks, return_exceptions=True)
+            self._pending_tasks.clear()
+
+    # ------------------------------------------------------------------
+    # Tool & insight helpers
+    # ------------------------------------------------------------------
+
+    def _register_user_tools(self, user_id: str) -> None:
+        """Register default tools bound to the current user."""
+        if self.tool_registry.tools:
+            return  # already registered
+        for tool in build_default_tools(
+            graph_api=self.graph_api,
+            qdrant=self.qdrant,
+            user_id=user_id,
+            embedding_service=self.embedding_service,
+        ):
+            self.tool_registry.register(tool)
+
+    async def _load_recent_insights(self, user_id: str, limit: int = 3) -> list[dict]:
+        """Load the N most recent INSIGHT nodes from the graph."""
+        try:
+            insights = await self.graph_api.storage.find_nodes(
+                user_id, node_type="INSIGHT", limit=limit,
+            )
+            insights.sort(
+                key=lambda n: n.metadata.get("created_at", n.created_at or ""),
+                reverse=True,
+            )
+            return [
+                {
+                    "title": n.name or "",
+                    "description": (n.text or "")[:200],
+                    "severity": n.metadata.get("severity", "info"),
+                    "pattern_type": n.metadata.get("pattern_type", ""),
+                }
+                for n in insights[:limit]
+            ]
+        except Exception as exc:
+            logger.warning("Failed to load insights: %s", exc)
+            return []
+
+    async def _handle_tool_calls(
+        self,
+        user_id: str,
+        reply_text: str,
+        text: str,
+        intent: str,
+        graph_context: dict,
+        mood_context: dict,
+        parts_context: list,
+    ) -> str:
+        """Parse tool calls in LLM reply, execute, and re-generate if needed."""
+        calls = self.tool_registry.parse_tool_calls(reply_text)
+        if not calls:
+            return reply_text
+
+        # Execute tools
+        tool_results: list[str] = []
+        for tool_name, args in calls[:3]:  # max 3 tools per turn
+            result = await self.tool_registry.dispatch(tool_name, args)
+            if result.success:
+                import json
+                tool_results.append(
+                    f"[{tool_name}]: {json.dumps(result.data, ensure_ascii=False, default=str)[:500]}"
+                )
+            else:
+                tool_results.append(f"[{tool_name}]: ошибка — {result.error}")
+
+        if not tool_results:
+            return reply_text
+
+        # Re-generate reply with tool results injected into context
+        graph_context["tool_results"] = "\n".join(tool_results)
+        act = await self._act.run(
+            user_id=user_id,
+            text=text,
+            intent=intent,
+            created_nodes=[],
+            created_edges=[],
+            graph_context=graph_context,
+            mood_context=mood_context,
+            parts_context=parts_context,
+            retrieved_context=[],
+            policy="REFLECT",
+        )
+        return act.reply_text
 
     # ------------------------------------------------------------------
     # Aliases & utilities kept on processor for backward compatibility
