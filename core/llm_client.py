@@ -29,6 +29,8 @@ class LLMClient(Protocol):
 
     async def extract_emotion(self, text: str, intent: str) -> dict[str, Any] | str: ...
 
+    async def arbitrate_emotion(self, text: str, system_prompt: str) -> dict[str, Any] | str: ...
+
     async def generate_live_reply(
         self,
         user_text: str,
@@ -61,6 +63,9 @@ class MockLLMClient:
 
     async def extract_emotion(self, text: str, intent: str) -> dict[str, Any]:
         return {"nodes": [], "edges": []}
+
+    async def arbitrate_emotion(self, text: str, system_prompt: str) -> dict[str, Any]:
+        return {"emotions": []}
 
     async def generate_live_reply(
         self,
@@ -134,6 +139,16 @@ class OpenRouterQwenClient:
 
     async def extract_emotion(self, text: str, intent: str) -> dict[str, Any] | str:
         return await self._extract_by_scope(text=text, intent=intent, scope="emotion")
+
+    async def arbitrate_emotion(self, text: str, system_prompt: str) -> dict[str, Any] | str:
+        """LLM emotion arbitration with a *custom* system prompt."""
+        raw = await self._chat_json_with_prompt(
+            payload={"text": text},
+            system_prompt=system_prompt,
+        )
+        if not raw:
+            return {"emotions": []}
+        return raw
 
     async def generate_live_reply(
         self,
@@ -272,6 +287,43 @@ class OpenRouterQwenClient:
 
         reply = completion.choices[0].message.content or ""
         return reply.strip()
+
+    async def _chat_json_with_prompt(self, payload: dict[str, Any], system_prompt: str) -> str:
+        """Like ``_chat_json`` but accepts an *arbitrary* system prompt."""
+        client = self._get_client()
+        if client is None:
+            logger.warning("LLM client unavailable, skipping API call")
+            return ""
+        try:
+            completion = await client.chat.completions.create(
+                model=self.model_id,
+                temperature=0,
+                max_tokens=2000,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": system_prompt,
+                        "cache_control": {"type": "ephemeral"},
+                    },
+                    {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+                ],
+            )
+        except OpenAIError as exc:
+            logger.exception("LLM _chat_json_with_prompt failed: %s", exc)
+            return ""
+
+        usage = getattr(completion, "usage", None)
+        if usage:
+            logger.info(
+                "LLM tokens: prompt=%s completion=%s total=%s",
+                getattr(usage, "prompt_tokens", "?"),
+                getattr(usage, "completion_tokens", "?"),
+                getattr(usage, "total_tokens", "?"),
+            )
+
+        if not completion.choices:
+            return ""
+        return completion.choices[0].message.content or ""
 
     async def _extract_by_scope(self, *, text: str, intent: str, scope: str) -> dict[str, Any] | str:
         payload = {

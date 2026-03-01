@@ -84,6 +84,11 @@ class OrientStage:
 
     async def run(self, user_id: str, text: str, intent: str) -> OrientResult:
         person = await self.graph_api.ensure_person_node(user_id)
+
+        # ── Load persisted baseline from PERSON node metadata ────
+        if person.metadata:
+            extractor_emotion.load_baseline_from_meta(user_id, person.metadata)
+
         graph_context = await self.context_builder.build(user_id)
 
         nodes, edges, llm_intent = await self._extract_via_llm_all(
@@ -95,6 +100,12 @@ class OrientStage:
         )
 
         intent = self._reconcile_intent(intent, llm_intent, text)
+
+        # ── Persist updated baseline back to PERSON node ─────────
+        baseline = extractor_emotion.get_baseline(user_id)
+        if baseline.sample_count > 0:
+            person.metadata.update(baseline.to_dict())
+            await self.graph_api.storage.upsert_node(person)
 
         created_nodes, created_edges = await self.graph_api.apply_changes(user_id, nodes, edges)
         if self.embedding_service:

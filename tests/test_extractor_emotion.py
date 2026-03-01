@@ -6,11 +6,13 @@ from core.pipeline.extractor_emotion import (
     EMOTION_RULES,
     EmotionSignal,
     PersonalBaseline,
+    _analyze_context,
     _detect_emotions,
     _detect_sarcasm,
     _emotion_from_word,
     _extract_cause,
     _merge_signals,
+    _VAD_NORMS,
     extract,
     get_baseline,
 )
@@ -402,3 +404,244 @@ def test_emotion_signal_to_metadata():
     assert meta["cause"] == "экзамен"
     assert meta["multi_labels"] == ["fear"]
     assert meta["implicit"] is False
+
+
+# ═══════════════════════════════════════════════════════════════════
+# NEW: Negation handling
+# ═══════════════════════════════════════════════════════════════════
+
+
+def test_negation_skips_emotion():
+    """'я не боюсь' should NOT produce a fear signal."""
+    results = _detect_emotions("я не боюсь")
+    labels = {r.label for r in results}
+    assert "страх" not in labels
+
+
+def test_negation_net():
+    results = _detect_emotions("нет никакого страха")
+    labels = {r.label for r in results}
+    assert "страх" not in labels
+
+
+def test_negation_doesnt_block_distant_emotion():
+    """Negation window is limited — distant emotion should still fire."""
+    results = _detect_emotions("я не хочу думать об этом, мне страшно")
+    labels = {r.label for r in results}
+    assert "страх" in labels
+
+
+def test_double_positive_still_works():
+    results = _detect_emotions("мне страшно и стыдно")
+    labels = {r.label for r in results}
+    assert "страх" in labels
+    assert "стыд" in labels
+
+
+# ═══════════════════════════════════════════════════════════════════
+# NEW: Intensifiers / diminutives
+# ═══════════════════════════════════════════════════════════════════
+
+
+def test_amplifier_boosts_intensity():
+    baseline = _detect_emotions("мне грустно")
+    amplified = _detect_emotions("мне очень грустно")
+    assert len(baseline) >= 1 and len(amplified) >= 1
+    assert amplified[0].intensity > baseline[0].intensity
+
+
+def test_diminisher_lowers_intensity():
+    baseline = _detect_emotions("мне грустно")
+    dimmed = _detect_emotions("мне немного грустно")
+    assert len(baseline) >= 1 and len(dimmed) >= 1
+    assert dimmed[0].intensity < baseline[0].intensity
+
+
+def test_negated_diminisher_not_treated_as_negation():
+    """'не очень страшно' should be a diminisher, NOT a negation."""
+    results = _detect_emotions("мне не очень страшно")
+    labels = {r.label for r in results}
+    assert "страх" in labels  # still detected
+    # intensity should be reduced
+    sig = next(r for r in results if r.label == "страх")
+    base_intensity = _VAD_NORMS["страх"][3]
+    assert sig.intensity < base_intensity
+
+
+# ═══════════════════════════════════════════════════════════════════
+# NEW: Dynamic confidence
+# ═══════════════════════════════════════════════════════════════════
+
+
+def test_confidence_is_not_flat():
+    """Confidence should differ depending on modifiers."""
+    plain = _detect_emotions("мне грустно")
+    with_cause = _detect_emotions("мне грустно из-за работы")
+    assert len(plain) >= 1 and len(with_cause) >= 1
+    # cause adds +0.05 confidence
+    assert with_cause[0].confidence >= plain[0].confidence
+
+
+def test_uncertainty_reduces_confidence():
+    results = _detect_emotions("кажется мне грустно")
+    assert len(results) >= 1
+    assert results[0].confidence < 0.75  # base is 0.75, uncertainty -0.15
+
+
+def test_amplifier_boosts_confidence():
+    results = _detect_emotions("мне очень страшно")
+    assert len(results) >= 1
+    assert results[0].confidence > 0.75  # amplifier adds +0.10
+
+
+# ═══════════════════════════════════════════════════════════════════
+# NEW: Morphological coverage
+# ═══════════════════════════════════════════════════════════════════
+
+
+def test_morphology_trevoga():
+    """'тревога' should match fear (тревог stem)."""
+    result = _emotion_from_word("тревога")
+    assert result is not None
+    assert result[0] == "страх"
+
+
+def test_morphology_trevogi():
+    result = _emotion_from_word("тревоги")
+    assert result is not None
+    assert result[0] == "страх"
+
+
+def test_morphology_bespokoystvo():
+    result = _emotion_from_word("беспокойство")
+    assert result is not None
+    assert result[0] == "страх"
+
+
+def test_morphology_panika():
+    result = _emotion_from_word("паника")
+    assert result is not None
+    assert result[0] == "страх"
+
+
+def test_morphology_nervnichayu():
+    result = _emotion_from_word("нервничаю")
+    assert result is not None
+    assert result[0] == "страх"
+
+
+def test_morphology_volnuyus():
+    result = _emotion_from_word("волнуюсь")
+    assert result is not None
+    assert result[0] == "страх"
+
+
+def test_morphology_besit():
+    result = _emotion_from_word("бесит")
+    assert result is not None
+    assert result[0] == "злость"
+
+
+def test_morphology_toska():
+    result = _emotion_from_word("тоска")
+    assert result is not None
+    assert result[0] == "грусть"
+
+
+def test_morphology_vostorg():
+    result = _emotion_from_word("восторг")
+    assert result is not None
+    assert result[0] == "радость"
+
+
+# ═══════════════════════════════════════════════════════════════════
+# NEW: Research-backed VAD norms
+# ═══════════════════════════════════════════════════════════════════
+
+
+def test_vad_norms_all_labels_covered():
+    labels_in_rules = {label for _, label, *_ in EMOTION_RULES}
+    for label in labels_in_rules:
+        assert label in _VAD_NORMS, f"{label} missing from _VAD_NORMS"
+
+
+def test_vad_anger_positive_arousal():
+    """Anger has high arousal (research norm)."""
+    v, a, d, i = _VAD_NORMS["злость"]
+    assert a > 0.3  # anger is high-arousal
+
+
+def test_vad_sadness_negative_valence():
+    v, a, d, i = _VAD_NORMS["грусть"]
+    assert v < -0.5
+
+
+def test_vad_joy_positive_all():
+    v, a, d, i = _VAD_NORMS["радость"]
+    assert v > 0.5
+    assert d > 0.3  # joy = feeling of control
+
+
+# ═══════════════════════════════════════════════════════════════════
+# NEW: Ambivalence detection
+# ═══════════════════════════════════════════════════════════════════
+
+
+def test_ambivalence_detected():
+    """Opposing-valence emotions should be marked ambivalent."""
+    pos = EmotionSignal("радость", 0.8, 0.4, 0.4, 0.8, confidence=0.85, source="regex")
+    neg = EmotionSignal("грусть", -0.7, -0.2, -0.4, 0.7, confidence=0.8, source="regex")
+    merged = _merge_signals([pos, neg], [], [])
+    assert len(merged) == 2
+    assert all(s.ambivalent for s in merged)
+
+
+def test_no_ambivalence_same_valence():
+    """Same-valence emotions should NOT be marked ambivalent."""
+    s1 = EmotionSignal("страх", -0.55, 0.33, -0.39, 0.85, confidence=0.85, source="regex")
+    s2 = EmotionSignal("грусть", -0.73, -0.38, -0.39, 0.7, confidence=0.8, source="regex")
+    merged = _merge_signals([s1, s2], [], [])
+    assert all(not s.ambivalent for s in merged)
+
+
+def test_ambivalent_metadata():
+    """Ambivalent flag appears in to_metadata()."""
+    sig = EmotionSignal("радость", 0.8, 0.4, 0.4, 0.8, ambivalent=True)
+    meta = sig.to_metadata()
+    assert meta.get("ambivalent") is True
+
+
+def test_non_ambivalent_metadata():
+    """Non-ambivalent signal should NOT have 'ambivalent' key."""
+    sig = EmotionSignal("грусть", -0.7, -0.2, -0.4, 0.7)
+    meta = sig.to_metadata()
+    assert "ambivalent" not in meta
+
+
+# ═══════════════════════════════════════════════════════════════════
+# NEW: _analyze_context unit tests
+# ═══════════════════════════════════════════════════════════════════
+
+
+def test_analyze_context_plain():
+    neg, mult, adj = _analyze_context("мне грустно", len("мне "))
+    assert not neg
+    assert mult == 1.0
+
+
+def test_analyze_context_negation():
+    neg, mult, adj = _analyze_context("я не боюсь", len("я не "))
+    assert neg is True
+
+
+def test_analyze_context_amplifier():
+    neg, mult, adj = _analyze_context("мне очень страшно", len("мне очень "))
+    assert not neg
+    assert mult == 1.3
+    assert adj >= 0.10
+
+
+def test_analyze_context_diminisher():
+    neg, mult, adj = _analyze_context("мне немного грустно", len("мне немного "))
+    assert not neg
+    assert mult == 0.5
