@@ -36,6 +36,15 @@ SCHEMA:
       "target_node_id": "n2",
       "relation": "HAS_VALUE|HOLDS_BELIEF|OWNS_PROJECT|HAS_TASK|RELATES_TO|DESCRIBES_EVENT|FEELS|EMOTION_ABOUT|EXPRESSED_AS|HAS_PART|TRIGGERED_BY|TRIGGERS|PROTECTS|PROTECTS_NEED|SIGNALS_NEED|CONFLICTS_WITH|SUPPORTS"
     }
+  ],
+  "hypotheses": [
+    {
+      "name": "primary|alternative",
+      "confidence": 0.0,
+      "rationale": "кратко почему",
+      "nodes": [],
+      "edges": []
+    }
   ]
 }
 
@@ -45,6 +54,7 @@ SCHEMA:
 - Используй только разрешённые type/relation.
 - Если есть сущности — nodes и edges не пустые.
 - Ссылка на пользователя всегда: "person:me".
+- Верни минимум 2 гипотезы в hypotheses (primary + alternative), даже если они очень похожи.
 
 ПРАВИЛА INTENT (по приоритету):
 1. Есть слова эмоций (стыд, страх, тревога, радость, усталость, злость, вина, обида и т.п.) → FEELING_REPORT

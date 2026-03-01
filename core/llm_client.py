@@ -227,6 +227,30 @@ class OpenRouterQwenClient:
             + "\n".join(context_lines)
         ) if context_lines else "Первое обращение пользователя."
 
+        # --- Recent system insights ---
+        insights = (graph_context or {}).get("recent_insights", [])
+        if insights:
+            insight_lines = []
+            for ins in insights[:3]:
+                sev = ins.get("severity", "info")
+                title = ins.get("title", "")
+                desc = ins.get("description", "")[:150]
+                insight_lines.append(f"  [{sev}] {title}: {desc}")
+            context_block += (
+                "\n\nИнсайты системы (обнаружены фоновым анализом):\n"
+                + "\n".join(insight_lines)
+            )
+
+        # --- Available tools ---
+        tools_desc = (graph_context or {}).get("available_tools", "")
+        if tools_desc:
+            context_block += f"\n\nДоступные инструменты:\n{tools_desc}"
+
+        # --- Tool results (if any) ---
+        tool_results = (graph_context or {}).get("tool_results", "")
+        if tool_results:
+            context_block += f"\n\nРезультаты инструментов:\n{tool_results}"
+
         # --- Session conversation history ---
         session_ctx = (graph_context or {}).get("session_context", [])
         history_block = ""

@@ -131,7 +131,7 @@ class DecideStage:
 
         # --- Mood update ---
         emotion_nodes = [n for n in created_nodes if n.type == "EMOTION"]
-        mood_context = await self.mood_tracker.update(user_id, emotion_nodes)
+        mood_context = await self.mood_tracker.update(user_id, emotion_nodes) or {}
 
         return DecideResult(
             policy=policy,

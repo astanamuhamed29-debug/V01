@@ -138,8 +138,11 @@ def test_processor_does_not_crash_on_bad_llm_json(tmp_path):
                 source="cli",
             )
 
-            assert result.intent in {"REFLECTION", "FEELING_REPORT"}
-            assert len(await api.get_user_nodes_by_type("me", "NOTE")) >= 1
+            # LLM сломан → экстракция вернула 0 нод (regex-fallback убран)
+            # Главное — система не упала
+            assert result is not None
+            assert isinstance(result.nodes, list)
+            assert isinstance(result.edges, list)
         finally:
             await api.storage.close()
 

@@ -49,7 +49,6 @@ def test_process_message_rejects_too_long(tmp_path):
             journal=journal,
             qdrant=_NoopQdrant(),
             session_memory=SessionMemory(),
-            use_llm=False,
         )
         try:
             long_text = "x" * 10001
@@ -72,7 +71,6 @@ def test_process_message_accepts_max_length(tmp_path):
             journal=journal,
             qdrant=_NoopQdrant(),
             session_memory=SessionMemory(),
-            use_llm=False,
         )
         try:
             text = "а" * 10000  # exactly at the limit

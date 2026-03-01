@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+from typing import Protocol
+
+import aiosqlite
+
+
+class _GraphStorageLike(Protocol):
+    async def _ensure_initialized(self) -> None: ...
+    async def _get_conn(self) -> aiosqlite.Connection: ...
+
 
 class MoodOpsMixin:
     """Операции с mood_snapshots: save, get_latest, get_list."""
 
-    async def save_mood_snapshot(self, snapshot: dict) -> None:
+    async def save_mood_snapshot(self: _GraphStorageLike, snapshot: dict) -> None:
         await self._ensure_initialized()
         conn = await self._get_conn()
         await conn.execute(
@@ -44,7 +53,7 @@ class MoodOpsMixin:
         )
         await conn.commit()
 
-    async def get_latest_mood_snapshot(self, user_id: str) -> dict | None:
+    async def get_latest_mood_snapshot(self: _GraphStorageLike, user_id: str) -> dict | None:
         await self._ensure_initialized()
         conn = await self._get_conn()
         cursor = await conn.execute(
@@ -59,7 +68,7 @@ class MoodOpsMixin:
         row = await cursor.fetchone()
         return dict(row) if row else None
 
-    async def get_mood_snapshots(self, user_id: str, limit: int = 5) -> list[dict]:
+    async def get_mood_snapshots(self: _GraphStorageLike, user_id: str, limit: int = 5) -> list[dict]:
         await self._ensure_initialized()
         conn = await self._get_conn()
         cursor = await conn.execute(

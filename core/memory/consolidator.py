@@ -316,10 +316,10 @@ def _cluster_by_embedding(
 
 
 _ABSTRACTION_PROMPT = (
-    "You are a psychologist assistant. "
-    "Summarise the following beliefs into ONE concise archetype belief "
-    "(1-2 sentences, in the same language as the input). "
-    "Return ONLY the summary text, nothing else.\n\n"
+    "Ты — ассистент-психолог. "
+    "Объедини следующие убеждения в ОДНО ёмкое убеждение-архетип "
+    "(1-2 предложения, на русском языке). "
+    "Верни ТОЛЬКО текст резюме, ничего больше.\n\n"
 )
 
 

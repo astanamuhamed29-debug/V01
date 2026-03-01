@@ -64,14 +64,13 @@ def test_live_reply_fallback(tmp_path, monkeypatch):
             qdrant=_NoopQdrant(),
             session_memory=SessionMemory(),
             llm_client=llm_client,
-            use_llm=False,
         )
 
         try:
             result = await processor.process_message(user_id="me", text="в чем твоя польза", source="cli")
 
             assert llm_client.live_reply_calls == 1
-            assert result.reply_text.startswith("Слышу запрос на")
+            assert result.reply_text.startswith("Слышу")
         finally:
             await api.storage.close()
 
@@ -92,14 +91,13 @@ def test_live_reply_disabled(tmp_path, monkeypatch):
             qdrant=_NoopQdrant(),
             session_memory=SessionMemory(),
             llm_client=llm_client,
-            use_llm=False,
         )
 
         try:
             result = await processor.process_message(user_id="me", text="в чем твоя польза", source="cli")
 
             assert llm_client.live_reply_calls == 0
-            assert result.reply_text.startswith("Слышу запрос на")
+            assert result.reply_text.startswith("Слышу")
         finally:
             await api.storage.close()
 

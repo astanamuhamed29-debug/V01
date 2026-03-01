@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import datetime, timedelta, timezone
 
 from core.context.session_memory import SessionMemory
@@ -17,6 +18,52 @@ class _NoopQdrant:
         return []
 
 
+class _EmotionLLMClient:
+    """LLM-мок: возвращает эмоции «усталость» и «злость»."""
+
+    async def classify_intent(self, text):
+        return "FEELING_REPORT"
+
+    async def extract_all(self, text, intent, graph_hints=None):
+        return json.dumps({
+            "_reasoning": {
+                "situation": "Прокрастинация",
+                "appraisal": "Самообвинение",
+                "affect": "Усталость и злость",
+                "defenses": "Критик",
+                "core_needs": "Отдых"
+            },
+            "intent": "FEELING_REPORT",
+            "nodes": [
+                {"id": "n1", "type": "EMOTION",
+                 "metadata": {"label": "усталость", "valence": -0.5, "arousal": -0.3,
+                              "dominance": -0.4, "intensity": 0.7}},
+                {"id": "n2", "type": "EMOTION",
+                 "metadata": {"label": "злость", "valence": -0.7, "arousal": 0.6,
+                              "dominance": -0.3, "intensity": 0.8}},
+            ],
+            "edges": [
+                {"source_node_id": "person:me", "target_node_id": "n1", "relation": "FEELS"},
+                {"source_node_id": "person:me", "target_node_id": "n2", "relation": "FEELS"},
+            ]
+        }, ensure_ascii=False)
+
+    async def extract_semantic(self, text, intent):
+        return {"nodes": [], "edges": []}
+
+    async def extract_parts(self, text, intent):
+        return {"nodes": [], "edges": []}
+
+    async def extract_emotion(self, text, intent):
+        return {"nodes": [], "edges": []}
+
+    async def arbitrate_emotion(self, text, system_prompt):
+        return {"emotions": []}
+
+    async def generate_live_reply(self, user_text, intent, mood_context, parts_context, graph_context):
+        return ""
+
+
 def test_mood_snapshots_and_trend_reply(tmp_path):
     async def scenario() -> None:
         db_path = tmp_path / "test.db"
@@ -28,7 +75,7 @@ def test_mood_snapshots_and_trend_reply(tmp_path):
             journal=journal,
             qdrant=_NoopQdrant(),
             session_memory=SessionMemory(),
-            use_llm=False,
+            llm_client=_EmotionLLMClient(),
         )
 
         try:
@@ -96,7 +143,6 @@ def test_mood_tracker_temporal_weights_favor_recent(tmp_path):
                 journal=JournalStorage(db_path=db_path),
                 qdrant=_NoopQdrant(),
                 session_memory=SessionMemory(),
-                use_llm=False,
             ).mood_tracker
 
             snapshot = await tracker.update("u_weight", [])

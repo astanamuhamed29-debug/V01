@@ -30,6 +30,7 @@ class GraphContextBuilder:
         values_raw = await self.storage.find_nodes(user_id, node_type="VALUE", limit=20)
         beliefs_raw = await self.storage.find_nodes(user_id, node_type="BELIEF", limit=10)
         notes_raw = await self.storage.find_nodes(user_id, node_type="NOTE", limit=5)
+        insights_raw = await self.storage.find_nodes(user_id, node_type="INSIGHT", limit=5)
 
         active_projects = [n.name for n in projects_raw if n.name]
 
@@ -87,6 +88,22 @@ class GraphContextBuilder:
             "total_messages": total_messages,
             "has_history": total_known > 5,
         }
+
+        # ── Recent insights (system-generated pattern observations) ─
+        if insights_raw:
+            insights_raw.sort(
+                key=lambda n: n.metadata.get("created_at", n.created_at or ""),
+                reverse=True,
+            )
+            context["recent_insights"] = [
+                {
+                    "title": n.name or "",
+                    "description": (n.text or "")[:200],
+                    "severity": n.metadata.get("severity", "info"),
+                    "pattern_type": n.metadata.get("pattern_type", ""),
+                }
+                for n in insights_raw[:3]
+            ]
 
         try:
             pattern_report = await self.pattern_analyzer.analyze(user_id, days=30)

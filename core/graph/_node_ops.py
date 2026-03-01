@@ -6,6 +6,7 @@ import json
 import logging
 import sqlite3
 from datetime import datetime, timezone
+from typing import Protocol
 
 import aiosqlite
 
@@ -14,10 +15,16 @@ from core.graph.model import Edge, Node, ensure_metadata_defaults
 logger = logging.getLogger(__name__)
 
 
+class _GraphStorageLike(Protocol):
+    async def _ensure_initialized(self) -> None: ...
+    async def _get_conn(self) -> aiosqlite.Connection: ...
+    async def upsert_node(self, node: Node) -> Node: ...
+
+
 class NodeOpsMixin:
     """Операции с узлами: upsert, find, soft-delete, merge, retention."""
 
-    async def upsert_node(self, node: Node) -> Node:
+    async def upsert_node(self: _GraphStorageLike, node: Node) -> Node:
         await self._ensure_initialized()
 
         node_metadata = ensure_metadata_defaults(dict(node.metadata))
@@ -101,7 +108,7 @@ class NodeOpsMixin:
             created_at=created_at,
         )
 
-    async def upsert_nodes_batch(self, nodes_data: list[tuple[Node, dict]]) -> list[Node]:
+    async def upsert_nodes_batch(self: _GraphStorageLike, nodes_data: list[tuple[Node, dict]]) -> list[Node]:
         """Атомарный upsert списка узлов в одной транзакции."""
         await self._ensure_initialized()
         conn = await self._get_conn()
@@ -166,7 +173,7 @@ class NodeOpsMixin:
 
         return saved
 
-    async def get_node(self, node_id: str) -> Node:
+    async def get_node(self: _GraphStorageLike, node_id: str) -> Node:
         await self._ensure_initialized()
         conn = await self._get_conn()
         cursor = await conn.execute("SELECT * FROM nodes WHERE id = ?", (node_id,))
@@ -176,7 +183,7 @@ class NodeOpsMixin:
         return _row_to_node(row)
 
     async def find_nodes(
-        self,
+        self: _GraphStorageLike,
         user_id: str,
         node_type: str | None = None,
         name: str | None = None,
@@ -200,7 +207,7 @@ class NodeOpsMixin:
         return [_row_to_node(row) for row in rows]
 
     async def find_nodes_recent(
-        self,
+        self: _GraphStorageLike,
         user_id: str,
         node_type: str,
         limit: int = 5,
@@ -221,7 +228,7 @@ class NodeOpsMixin:
         rows = await cursor.fetchall()
         return [_row_to_node(row) for row in rows]
 
-    async def find_by_key(self, user_id: str, node_type: str, key: str) -> Node | None:
+    async def find_by_key(self: _GraphStorageLike, user_id: str, node_type: str, key: str) -> Node | None:
         await self._ensure_initialized()
         conn = await self._get_conn()
         cursor = await conn.execute(
@@ -231,7 +238,7 @@ class NodeOpsMixin:
         row = await cursor.fetchone()
         return _row_to_node(row) if row else None
 
-    async def get_nodes_by_ids(self, user_id: str, node_ids: list[str]) -> list[Node]:
+    async def get_nodes_by_ids(self: _GraphStorageLike, user_id: str, node_ids: list[str]) -> list[Node]:
         """Возвращает узлы пользователя по списку id одним SQL-запросом."""
         if not node_ids:
             return []
@@ -244,7 +251,7 @@ class NodeOpsMixin:
         rows = await cursor.fetchall()
         return [_row_to_node(row) for row in rows]
 
-    async def count_nodes(self, user_id: str) -> int:
+    async def count_nodes(self: _GraphStorageLike, user_id: str) -> int:
         """Общее количество узлов пользователя."""
         await self._ensure_initialized()
         conn = await self._get_conn()
@@ -254,7 +261,7 @@ class NodeOpsMixin:
         row = await cursor.fetchone()
         return int(row[0]) if row else 0
 
-    async def soft_delete_node(self, node_id: str) -> None:
+    async def soft_delete_node(self: _GraphStorageLike, node_id: str) -> None:
         """Пометить узел как удалённый без физического удаления."""
         await self._ensure_initialized()
         conn = await self._get_conn()
@@ -262,7 +269,7 @@ class NodeOpsMixin:
         await conn.commit()
 
     async def merge_nodes(
-        self,
+        self: _GraphStorageLike,
         user_id: str,
         source_node_ids: list[str],
         target_node: Node,
@@ -315,7 +322,7 @@ class NodeOpsMixin:
         return saved
 
     async def get_nodes_by_retention(
-        self,
+        self: _GraphStorageLike,
         user_id: str,
         max_retention: float = 0.3,
         node_types: list[str] | None = None,

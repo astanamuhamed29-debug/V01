@@ -23,6 +23,7 @@ NodeType = Literal[
     "EVENT",
     "EMOTION",
     "SOMA",
+    "INSIGHT",
 ]
 
 PartSubtype = Literal["MANAGER", "FIREFIGHTER", "EXILE"]
@@ -45,6 +46,7 @@ EdgeRelation = Literal[
     "SIGNALS_NEED",
     "CONFLICTS_WITH",
     "SUPPORTS",
+    "GENERATES_INSIGHT",
 ]
 
 
