@@ -56,3 +56,12 @@ DECIDE_PATTERN_SCORE_THRESHOLD: float = 0.85
 
 # ── ObserveStage (core/pipeline/stage_observe.py) ────────────────
 SESSION_GAP_MINUTES: int = 30
+
+# ── Emotion Extractor (core/pipeline/extractor_emotion.py) ───────
+EMOTION_CONFIDENCE_MIN: float = 0.3
+EMOTION_LLM_ARBITER_THRESHOLD: float = 0.5
+EMOTION_ERC_CONTEXT_WINDOW: int = 5
+EMOTION_BASELINE_V: float = 0.0
+EMOTION_BASELINE_A: float = 0.0
+EMOTION_BASELINE_D: float = 0.0
+EMOTION_IMPLICIT_MIN_CONTEXT: int = 2

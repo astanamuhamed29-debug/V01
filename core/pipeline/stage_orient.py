@@ -25,7 +25,7 @@ from core.pipeline import extractor_emotion, extractor_parts, extractor_semantic
 from core.search.qdrant_storage import QdrantVectorStorage, VectorSearchResult
 
 if TYPE_CHECKING:
-    pass
+    from core.context.session_memory import SessionMemory
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +72,7 @@ class OrientStage:
         qdrant: QdrantVectorStorage,
         context_builder: GraphContextBuilder,
         use_llm: bool,
+        session_memory: "SessionMemory | None" = None,
     ) -> None:
         self.graph_api = graph_api
         self.llm_client = llm_client
@@ -79,6 +80,7 @@ class OrientStage:
         self.qdrant = qdrant
         self.context_builder = context_builder
         self.use_llm = use_llm
+        self.session_memory = session_memory
 
     async def run(self, user_id: str, text: str, intent: str) -> OrientResult:
         person = await self.graph_api.ensure_person_node(user_id)
@@ -189,7 +191,12 @@ class OrientStage:
 
         semantic_nodes, semantic_edges = await extractor_semantic.extract(user_id, text, intent, person_id)
         parts_nodes, parts_edges = await extractor_parts.extract(user_id, text, intent, person_id)
-        emotion_nodes, emotion_edges = await extractor_emotion.extract(user_id, text, intent, person_id)
+        emotion_nodes, emotion_edges = await extractor_emotion.extract(
+            user_id, text, intent, person_id,
+            session_memory=self.session_memory,
+            llm_client=self.llm_client,
+            embedding_service=self.embedding_service,
+        )
         return (
             [*semantic_nodes, *parts_nodes, *emotion_nodes],
             [*semantic_edges, *parts_edges, *emotion_edges],

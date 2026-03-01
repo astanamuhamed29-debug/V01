@@ -30,7 +30,11 @@ class MoodTracker:
             except ValueError:
                 dt = now
             age_days = max((now - dt).total_seconds() / 86400.0, 0.0)
-            weights.append(1.0 / (1.0 + age_days / 14.0))
+            age_weight = 1.0 / (1.0 + age_days / 14.0)
+            # NOTE: improved — weight by confidence * intensity, not just age-decay.
+            confidence = float(node.metadata.get("confidence", 0.7))
+            intensity = float(node.metadata.get("intensity", 0.5))
+            weights.append(age_weight * confidence * intensity)
 
         total_weight = sum(weights) or 1.0
 

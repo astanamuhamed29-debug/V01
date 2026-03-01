@@ -97,6 +97,7 @@ class MessageProcessor:
             qdrant=qdrant,
             context_builder=self.context_builder,
             use_llm=effective_use_llm,
+            session_memory=session_memory,
         )
         self._decide = DecideStage(
             graph_api=graph_api,
