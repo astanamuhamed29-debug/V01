@@ -4,6 +4,7 @@ import logging
 from collections import Counter
 from datetime import datetime, timezone
 
+from core.analytics.identity_snapshot import IdentitySnapshotBuilder
 from core.analytics.pattern_analyzer import PatternAnalyzer, PatternReport
 from core.defaults import MOOD_TREND_DELTA
 from core.graph.storage import GraphStorage
@@ -16,6 +17,7 @@ class GraphContextBuilder:
     def __init__(self, storage: GraphStorage, embedding_service: EmbeddingService | None = None) -> None:
         self.storage = storage
         self.pattern_analyzer = PatternAnalyzer(storage, embedding_service=embedding_service)
+        self._snapshot_builder = IdentitySnapshotBuilder(storage, embedding_service=embedding_service)
 
     async def build(self, user_id: str) -> dict:
         """
@@ -137,6 +139,14 @@ class GraphContextBuilder:
             f"{item.source_name} <-> {item.target_name} ({item.reason})"
             for item in pattern_report.implicit_links[:2]
         ]
+
+        # ── Identity Snapshot (digital fingerprint) ─────────────
+        try:
+            identity = await self._snapshot_builder.build(user_id, days=30)
+            context["identity_snapshot"] = identity.to_dict()
+        except Exception as exc:
+            logger.warning("IdentitySnapshot failed for user=%s: %s", user_id, exc)
+            context["identity_snapshot"] = None
 
         logger.debug(
             "GraphContext built: projects=%d parts=%d emotions=%d",
