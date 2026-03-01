@@ -11,7 +11,8 @@ from networkx.algorithms import community  # type: ignore[import-not-found]
 
 from core.graph.model import Edge, Node, edge_weight
 from core.graph.model import get_node_embedding
-from core.graph.storage import GraphStorage, _cosine_similarity
+from core.graph.storage import GraphStorage
+from core.utils.math import cosine_similarity as _cosine_similarity
 from core.llm.embedding_service import EmbeddingService
 
 

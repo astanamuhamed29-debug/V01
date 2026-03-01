@@ -879,13 +879,5 @@ def _row_to_edge(row: aiosqlite.Row) -> Edge:
     )
 
 
-def _cosine_similarity(a: list[float], b: list[float]) -> float:
-    """Stdlib-only cosine similarity."""
-    if len(a) != len(b):
-        return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
-    norm_a = math.sqrt(sum(x * x for x in a))
-    norm_b = math.sqrt(sum(y * y for y in b))
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return dot / (norm_a * norm_b)
+# Backward-compat alias — canonical implementation lives in core.utils.math
+from core.utils.math import cosine_similarity as _cosine_similarity  # noqa: E402

@@ -1,7 +1,7 @@
 import asyncio
 from typing import Any, cast
 
-from core.graph.storage import _cosine_similarity
+from core.utils.math import cosine_similarity as _cosine_similarity
 from core.llm.embedding_service import EmbeddingService, _node_to_embed_text
 
 
