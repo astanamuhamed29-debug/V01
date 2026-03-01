@@ -3,7 +3,7 @@ import json
 import os
 import sys
 import webbrowser
-from pathlib import Path
+from datetime import datetime
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -40,15 +40,14 @@ async def generate_3d_graph(db_path: str, output_html: str = "graph_3d.html", us
         query += " WHERE user_id = ?"
         params.append(user_id)
         
-    async with storage._get_conn() as db:
-        async with db.execute(query, params) as cursor:
-            nodes_raw = await cursor.fetchall()
+    db = await storage._get_conn()
+    async with db.execute(query, params) as cursor:
+        nodes_raw = await cursor.fetchall()
             
     # Get all edges
-    query_edges = "SELECT source_id, target_id, relation FROM edges"
-    async with storage._get_conn() as db:
-        async with db.execute(query_edges) as cursor:
-            edges_raw = await cursor.fetchall()
+    query_edges = "SELECT source_node_id, target_node_id, relation FROM edges"
+    async with db.execute(query_edges) as cursor:
+        edges_raw = await cursor.fetchall()
 
     await storage.close()
 
@@ -95,37 +94,96 @@ async def generate_3d_graph(db_path: str, output_html: str = "graph_3d.html", us
 
     graph_data = {"nodes": nodes_data, "links": edges_data}
 
+    # Build emotional trajectory data (3D): x=time-index, y=valence(heuristic), z=arousal(heuristic)
+    emotion_rows = [row for row in nodes_raw if row[2] == "EMOTION"]
+    emotion_rows.sort(key=lambda row: row[5] or "")
+
+    vad_heuristics = {
+        "радость": (0.75, 0.45),
+        "гордость": (0.65, 0.35),
+        "спокойствие": (0.45, -0.45),
+        "облегчение": (0.35, -0.25),
+        "тревога": (-0.65, 0.75),
+        "страх": (-0.75, 0.85),
+        "стыд": (-0.7, 0.35),
+        "печаль": (-0.65, -0.4),
+        "грусть": (-0.55, -0.35),
+        "злость": (-0.5, 0.8),
+        "беспомощность": (-0.8, 0.15),
+        "усталость": (-0.35, -0.65),
+    }
+
+    def _extract_emotion_label(key: str) -> str:
+        if not key:
+            return "unknown"
+        if key.startswith("emotion:"):
+            parts = key.split(":")
+            if len(parts) >= 2:
+                return parts[1].lower()
+        return key.lower()
+
+    emotions_data = []
+    for idx, row in enumerate(emotion_rows):
+        _, _, _, key, text, created_at = row
+        label = (text or _extract_emotion_label(key)).lower()
+        valence, arousal = vad_heuristics.get(label, (0.0, 0.0))
+        try:
+            ts = datetime.fromisoformat((created_at or "").replace("Z", "+00:00")).isoformat()
+        except ValueError:
+            ts = created_at or ""
+        emotions_data.append(
+            {
+                "i": idx,
+                "t": ts,
+                "label": label,
+                "valence": valence,
+                "arousal": arousal,
+                "color": COLORS.get("EMOTION", "#ff4b4b"),
+            }
+        )
+
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SELF-OS: 3D Memory Graph</title>
+    <title>SELF-OS: 3D Memory + Emotion State</title>
     <style>
         body {{ margin: 0; padding: 0; background-color: #050510; color: white; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; overflow: hidden; }}
-        #3d-graph {{ width: 100vw; height: 100vh; }}
-        #ui-overlay {{ position: absolute; top: 20px; left: 20px; pointer-events: none; z-index: 10; background: rgba(10,10,25,0.7); padding: 20px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); }}
+        #toolbar {{ position: absolute; top: 16px; right: 16px; z-index: 12; display: flex; gap: 8px; }}
+        .btn {{ background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.25); color: #fff; padding: 8px 12px; border-radius: 8px; cursor: pointer; }}
+        .btn.active {{ background: rgba(75,139,255,0.35); border-color: rgba(75,139,255,0.8); }}
+        #memory-3d, #emotion-3d {{ width: 100vw; height: 100vh; display: none; }}
+        #memory-3d.active, #emotion-3d.active {{ display: block; }}
+        #ui-overlay {{ position: absolute; top: 20px; left: 20px; pointer-events: none; z-index: 10; background: rgba(10,10,25,0.7); padding: 20px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); max-width: 420px; }}
         h1 {{ margin: 0 0 10px 0; font-size: 24px; letter-spacing: 1px; font-weight: 300; }}
         .legend-item {{ display: flex; align-items: center; margin-bottom: 8px; font-size: 14px; opacity: 0.9; }}
         .color-box {{ width: 12px; height: 12px; border-radius: 50%; margin-right: 10px; box-shadow: 0 0 8px currentColor; }}
         .stats {{ margin-top: 20px; font-size: 13px; color: #aaa; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px; }}
     </style>
     <script src="https://unpkg.com/3d-force-graph"></script>
-    <script src="https://unpkg.com/three"></script>
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 </head>
 <body>
+    <div id="toolbar">
+        <button id="btn-memory" class="btn active">Memory Graph 3D</button>
+        <button id="btn-emotion" class="btn">Emotion State 3D</button>
+    </div>
     <div id="ui-overlay">
-        <h1>SELF-OS: IDENTITY & MEMORY</h1>
+        <h1>SELF-OS: 3D Visualizer</h1>
         <div id="legend"></div>
         <div class="stats">
             Nodes: {len(nodes_data)}<br>
-            Edges: {len(edges_data)}
+            Edges: {len(edges_data)}<br>
+            Emotions: {len(emotions_data)}
         </div>
     </div>
-    <div id="3d-graph"></div>
+    <div id="memory-3d" class="active"></div>
+    <div id="emotion-3d"></div>
 
     <script>
         const gData = {json.dumps(graph_data)};
+        const emotionData = {json.dumps(emotions_data)};
         const colors = {json.dumps(COLORS)};
         
         // Build legend
@@ -140,8 +198,8 @@ async def generate_3d_graph(db_path: str, output_html: str = "graph_3d.html", us
             legend.appendChild(item);
         }});
 
-        // Initialize Force Graph 3D
-        const Graph = ForceGraph3D()(document.getElementById('3d-graph'))
+        // Initialize Force Graph 3D (memory)
+        const Graph = ForceGraph3D()(document.getElementById('memory-3d'))
             .graphData(gData)
             .nodeLabel('name')
             .nodeColor('color')
@@ -153,14 +211,6 @@ async def generate_3d_graph(db_path: str, output_html: str = "graph_3d.html", us
             .linkWidth(0.5)
             .backgroundColor('#050510')
             .onNodeHover(node => document.body.style.cursor = node ? 'pointer' : null);
-            
-        // Use Bloom effect from Three.js for glowing nodes
-        const {{ UnrealBloomPass }} = THREE;
-        const bloomPass = new UnrealBloomPass();
-        bloomPass.strength = 1.5;
-        bloomPass.radius = 0.5;
-        bloomPass.threshold = 0.1;
-        Graph.postProcessingComposer().addPass(bloomPass);
 
         // Auto-rotation around the center
         let angle = 0;
@@ -172,6 +222,74 @@ async def generate_3d_graph(db_path: str, output_html: str = "graph_3d.html", us
                 z: distance * Math.cos(angle)
             }});
         }}, 10);
+
+        // Emotional state 3D (Plotly)
+        const emotionX = emotionData.map(e => e.i);
+        const emotionY = emotionData.map(e => e.valence);
+        const emotionZ = emotionData.map(e => e.arousal);
+        const emotionText = emotionData.map(e => `${{e.label}}<br>${{e.t}}`);
+
+        const emotionTrace = {{
+            type: 'scatter3d',
+            mode: 'lines+markers',
+            x: emotionX,
+            y: emotionY,
+            z: emotionZ,
+            text: emotionText,
+            hovertemplate: 'idx=%{{x}}<br>valence=%{{y:.2f}}<br>arousal=%{{z:.2f}}<br>%{{text}}<extra></extra>',
+            line: {{ color: '#ff8888', width: 6 }},
+            marker: {{ size: 5, color: '#ff4b4b' }},
+            name: 'Emotion Trajectory'
+        }};
+
+        const emotionLayout = {{
+            paper_bgcolor: '#050510',
+            plot_bgcolor: '#050510',
+            font: {{ color: '#ffffff' }},
+            margin: {{ l: 0, r: 0, b: 0, t: 0 }},
+            scene: {{
+                xaxis: {{ title: 'Time Index' }},
+                yaxis: {{ title: 'Valence', range: [-1, 1] }},
+                zaxis: {{ title: 'Arousal', range: [-1, 1] }},
+                bgcolor: '#050510'
+            }}
+        }};
+
+        Plotly.newPlot('emotion-3d', [emotionTrace], emotionLayout, {{ responsive: true }});
+
+        // Animate emotion timeline cursor
+        if (emotionData.length > 0) {{
+            let emotionFrame = 1;
+            setInterval(() => {{
+                emotionFrame = (emotionFrame % emotionData.length) + 1;
+                Plotly.restyle('emotion-3d', {{
+                    x: [emotionX.slice(0, emotionFrame)],
+                    y: [emotionY.slice(0, emotionFrame)],
+                    z: [emotionZ.slice(0, emotionFrame)],
+                    text: [emotionText.slice(0, emotionFrame)]
+                }});
+            }}, 700);
+        }}
+
+        // View switching
+        const btnMemory = document.getElementById('btn-memory');
+        const btnEmotion = document.getElementById('btn-emotion');
+        const memoryView = document.getElementById('memory-3d');
+        const emotionView = document.getElementById('emotion-3d');
+
+        btnMemory.addEventListener('click', () => {{
+            btnMemory.classList.add('active');
+            btnEmotion.classList.remove('active');
+            memoryView.classList.add('active');
+            emotionView.classList.remove('active');
+        }});
+
+        btnEmotion.addEventListener('click', () => {{
+            btnEmotion.classList.add('active');
+            btnMemory.classList.remove('active');
+            emotionView.classList.add('active');
+            memoryView.classList.remove('active');
+        }});
     </script>
 </body>
 </html>
@@ -180,7 +298,7 @@ async def generate_3d_graph(db_path: str, output_html: str = "graph_3d.html", us
     with open(output_html, "w", encoding="utf-8") as f:
         f.write(html)
         
-    print(f"✅ Generated 3D interactive graph at: {os.path.abspath(output_html)}")
+    print(f"✅ Generated 3D memory+emotion visualization at: {os.path.abspath(output_html)}")
     
     # Open automatically in browser
     webbrowser.open(f"file://{os.path.abspath(output_html)}")

@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 from config import USE_LLM  # noqa: F401 — backward compat
 from core.context.builder import GraphContextBuilder
 from core.context.session_memory import SessionMemory
+from core.analytics.drift_monitor import DriftMonitor
 from core.graph.api import GraphAPI
 from core.graph.model import Edge, Node
 from core.insights.engine import InsightEngine
@@ -102,6 +103,7 @@ class MessageProcessor:
 
         # Insight engine — runs after every analysis pass
         self._insight_engine = InsightEngine(graph_api=graph_api)
+        self._drift_monitor = DriftMonitor(graph_api.storage)
 
         # Tool registry — tools are bound per-user in process_message
         self.tool_registry = ToolRegistry()
@@ -118,6 +120,7 @@ class MessageProcessor:
             embedding_service=embedding_service,
             qdrant=qdrant,
             context_builder=self.context_builder,
+            calibrator=calibrator,
             session_memory=session_memory,
         )
         self._decide = DecideStage(
@@ -194,6 +197,10 @@ class MessageProcessor:
             ]
 
         # 4. ACT — reply, session memory, event
+        drift = await self._drift_monitor.evaluate(user_id)
+        if drift.alert:
+            ori.graph_context["drift_alert"] = drift.to_dict()
+
         act = await self._act.run(
             user_id=user_id,
             text=obs.text,
@@ -303,6 +310,10 @@ class MessageProcessor:
                 new_edges=all_edges,
                 graph_context=ori.graph_context,
             )
+
+            drift = await self._drift_monitor.evaluate(user_id)
+            if drift.alert:
+                logger.warning("Extraction drift alert: %s", drift.to_dict())
 
             logger.info(
                 "BG analysis done: nodes=%d edges=%d policy=%s insights=%d",
@@ -475,4 +486,42 @@ class MessageProcessor:
             f"Чаще всего: {top_label}\n"
             f"Топ частей: {part_line}\n"
             f"Активные ценности: {value_line}"
+        )
+
+    # ------------------------------------------------------------------
+    # Human feedback loop APIs
+    # ------------------------------------------------------------------
+
+    async def submit_emotion_feedback(
+        self,
+        user_id: str,
+        *,
+        label: str,
+        predicted_confidence: float,
+        was_correct: bool,
+    ) -> None:
+        """Persist explicit user feedback for emotion extraction quality."""
+        await self.graph_api.storage.save_signal_feedback(
+            user_id=user_id,
+            signal_type=f"emotion:{label.strip().lower() or 'unknown'}",
+            signal_score=max(0.0, min(1.0, float(predicted_confidence))),
+            was_helpful=bool(was_correct),
+            sent_at=datetime.now(timezone.utc).isoformat(),
+        )
+
+    async def submit_insight_feedback(
+        self,
+        user_id: str,
+        *,
+        insight_title: str,
+        insight_score: float,
+        was_helpful: bool,
+    ) -> None:
+        """Persist explicit user feedback for generated insights."""
+        await self.graph_api.storage.save_signal_feedback(
+            user_id=user_id,
+            signal_type=f"insight:{insight_title.strip().lower()[:64]}",
+            signal_score=max(0.0, min(1.0, float(insight_score))),
+            was_helpful=bool(was_helpful),
+            sent_at=datetime.now(timezone.utc).isoformat(),
         )

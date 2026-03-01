@@ -3,13 +3,22 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Protocol
 from uuid import uuid4
+
+import aiosqlite
+
+
+class _GraphStorageLike(Protocol):
+    async def _ensure_initialized(self) -> None: ...
+    async def _get_conn(self) -> aiosqlite.Connection: ...
+    async def get_scheduler_state(self, user_id: str) -> dict | None: ...
 
 
 class SchedulerOpsMixin:
     """Операции планировщика: scheduler_state, signal_feedback, user_ids, activity."""
 
-    async def get_all_user_ids(self) -> list[str]:
+    async def get_all_user_ids(self: _GraphStorageLike) -> list[str]:
         """Все уникальные user_id у которых есть узлы в графе."""
         await self._ensure_initialized()
         conn = await self._get_conn()
@@ -19,7 +28,7 @@ class SchedulerOpsMixin:
         rows = await cursor.fetchall()
         return [row[0] for row in rows]
 
-    async def get_last_activity_at(self, user_id: str) -> str | None:
+    async def get_last_activity_at(self: _GraphStorageLike, user_id: str) -> str | None:
         """ISO datetime последнего созданного узла пользователя."""
         await self._ensure_initialized()
         conn = await self._get_conn()
@@ -30,7 +39,7 @@ class SchedulerOpsMixin:
         row = await cursor.fetchone()
         return row[0] if row and row[0] else None
 
-    async def get_scheduler_state(self, user_id: str) -> dict | None:
+    async def get_scheduler_state(self: _GraphStorageLike, user_id: str) -> dict | None:
         """Состояние scheduler для пользователя."""
         await self._ensure_initialized()
         conn = await self._get_conn()
@@ -42,7 +51,7 @@ class SchedulerOpsMixin:
         return dict(row) if row else None
 
     async def upsert_scheduler_state(
-        self,
+        self: _GraphStorageLike,
         user_id: str,
         last_proactive_at: str | None = None,
         last_checked_at: str | None = None,
@@ -83,7 +92,7 @@ class SchedulerOpsMixin:
         await conn.commit()
 
     async def save_signal_feedback(
-        self,
+        self: _GraphStorageLike,
         user_id: str,
         signal_type: str,
         signal_score: float,
@@ -111,7 +120,7 @@ class SchedulerOpsMixin:
         await conn.commit()
 
     async def get_signal_feedback(
-        self,
+        self: _GraphStorageLike,
         user_id: str,
         signal_type: str | None = None,
         limit: int = 100,

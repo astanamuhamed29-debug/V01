@@ -65,3 +65,25 @@ EMOTION_BASELINE_V: float = 0.0
 EMOTION_BASELINE_A: float = 0.0
 EMOTION_BASELINE_D: float = 0.0
 EMOTION_IMPLICIT_MIN_CONTEXT: int = 2
+
+# ── Extraction quality (core/analytics/extraction_quality.py) ────
+QUALITY_CALIBRATION_BINS: int = 10
+QUALITY_CALIBRATION_MIN_SAMPLES: int = 20
+QUALITY_TEMPORAL_HALFLIFE_DAYS: float = 120.0
+QUALITY_TEMPORAL_FLOOR: float = 0.20
+QUALITY_MULTI_HYP_MIN: int = 2
+
+# ── Drift monitor (core/analytics/drift_monitor.py) ─────────────
+DRIFT_MIN_SNAPSHOTS: int = 8
+DRIFT_VALENCE_SHIFT_WARN: float = 0.35
+DRIFT_AROUSAL_SHIFT_WARN: float = 0.35
+DRIFT_JS_WARN: float = 0.22
+
+# ── Personal baseline model (core/mood/personal_baseline.py) ───
+BASELINE_MIN_SNAPSHOTS: int = 5
+BASELINE_WINDOW: int = 45
+
+# ── Neuro layer (core/analytics/neuro_layer.py) ───────────────
+NEURO_LAYER_ENABLED_DEFAULT: bool = True
+NEURO_ALLOSTATIC_RECENT_WINDOW: int = 12
+NEURO_ALLOSTATIC_HIGH: float = 0.70

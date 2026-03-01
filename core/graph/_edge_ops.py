@@ -3,16 +3,22 @@
 from __future__ import annotations
 
 import json
+from typing import Protocol
 
 import aiosqlite
 
 from core.graph.model import Edge
 
 
+class _GraphStorageLike(Protocol):
+    async def _ensure_initialized(self) -> None: ...
+    async def _get_conn(self) -> aiosqlite.Connection: ...
+
+
 class EdgeOpsMixin:
     """Операции с рёбрами: add, get, list, filter."""
 
-    async def add_edge(self, edge: Edge) -> Edge:
+    async def add_edge(self: _GraphStorageLike, edge: Edge) -> Edge:
         await self._ensure_initialized()
         conn = await self._get_conn()
         cursor = await conn.execute(
@@ -51,7 +57,7 @@ class EdgeOpsMixin:
         await conn.commit()
         return edge
 
-    async def get_edge(self, edge_id: str) -> Edge:
+    async def get_edge(self: _GraphStorageLike, edge_id: str) -> Edge:
         await self._ensure_initialized()
         conn = await self._get_conn()
         cursor = await conn.execute("SELECT * FROM edges WHERE id = ?", (edge_id,))
@@ -60,7 +66,7 @@ class EdgeOpsMixin:
             raise KeyError(f"Edge not found: {edge_id}")
         return _row_to_edge(row)
 
-    async def list_edges(self, user_id: str) -> list[Edge]:
+    async def list_edges(self: _GraphStorageLike, user_id: str) -> list[Edge]:
         await self._ensure_initialized()
         conn = await self._get_conn()
         cursor = await conn.execute(
@@ -70,7 +76,7 @@ class EdgeOpsMixin:
         rows = await cursor.fetchall()
         return [_row_to_edge(row) for row in rows]
 
-    async def get_edges_by_relation(self, user_id: str, relation: str) -> list[Edge]:
+    async def get_edges_by_relation(self: _GraphStorageLike, user_id: str, relation: str) -> list[Edge]:
         """Все рёбра пользователя с указанным relation."""
         await self._ensure_initialized()
         conn = await self._get_conn()
@@ -81,7 +87,7 @@ class EdgeOpsMixin:
         rows = await cursor.fetchall()
         return [_row_to_edge(row) for row in rows]
 
-    async def get_edges_to_node(self, user_id: str, target_node_id: str) -> list[Edge]:
+    async def get_edges_to_node(self: _GraphStorageLike, user_id: str, target_node_id: str) -> list[Edge]:
         """Все рёбра входящие в указанный узел."""
         await self._ensure_initialized()
         conn = await self._get_conn()
@@ -92,7 +98,7 @@ class EdgeOpsMixin:
         rows = await cursor.fetchall()
         return [_row_to_edge(row) for row in rows]
 
-    async def get_edges_from_node(self, user_id: str, source_node_id: str) -> list[Edge]:
+    async def get_edges_from_node(self: _GraphStorageLike, user_id: str, source_node_id: str) -> list[Edge]:
         """Все рёбра исходящие из указанного узла."""
         await self._ensure_initialized()
         conn = await self._get_conn()

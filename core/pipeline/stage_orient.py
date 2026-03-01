@@ -14,13 +14,22 @@ from typing import TYPE_CHECKING
 from core.context.builder import GraphContextBuilder
 from core.graph.api import GraphAPI
 from core.graph.model import Edge, Node
+from core.analytics.calibrator import ThresholdCalibrator
+from core.analytics.extraction_quality import (
+    Hypothesis,
+    choose_best_hypothesis,
+    ensure_multi_hypotheses,
+    temporal_weight,
+)
 from core.llm.embedding_service import EmbeddingService
 from core.llm_client import LLMClient
 from core.llm.parser import (
+    extract_hypotheses_payload,
     is_minimal_payload,
     map_payload_to_graph,
     parse_json_payload,
 )
+from core.mood.personal_baseline import PersonalBaselineModel
 from core.pipeline import extractor_emotion, router
 from core.search.qdrant_storage import QdrantVectorStorage, VectorSearchResult
 
@@ -61,6 +70,7 @@ class OrientStage:
         embedding_service: EmbeddingService | None,
         qdrant: QdrantVectorStorage,
         context_builder: GraphContextBuilder,
+        calibrator: ThresholdCalibrator | None = None,
         use_llm: bool = True,
         session_memory: "SessionMemory | None" = None,
     ) -> None:
@@ -70,6 +80,8 @@ class OrientStage:
         self.qdrant = qdrant
         self.context_builder = context_builder
         self.session_memory = session_memory
+        self.calibrator = calibrator
+        self.personal_baseline_model = PersonalBaselineModel(graph_api.storage)
 
     async def run(self, user_id: str, text: str, intent: str) -> OrientResult:
         person = await self.graph_api.ensure_person_node(user_id)
@@ -166,9 +178,74 @@ class OrientStage:
                 return [], [], None
 
             parsed = parse_json_payload(payload)
+
             llm_nodes, llm_edges = map_payload_to_graph(
                 user_id=user_id, person_id=person_id, data=parsed,
             )
+            primary_nodes = list(llm_nodes)
+            primary_edges = list(llm_edges)
+
+            hypotheses = ensure_multi_hypotheses(llm_nodes, llm_edges)
+
+            for raw_hyp in extract_hypotheses_payload(parsed):
+                h_nodes, h_edges = map_payload_to_graph(
+                    user_id=user_id,
+                    person_id=person_id,
+                    data={"nodes": raw_hyp.get("nodes", []), "edges": raw_hyp.get("edges", [])},
+                )
+                hypotheses.append(
+                    Hypothesis(
+                        name=str(raw_hyp.get("name", "alternative")),
+                        nodes=h_nodes,
+                        edges=h_edges,
+                        confidence=float(raw_hyp.get("confidence", 0.5)),
+                        rationale=str(raw_hyp.get("rationale", "")),
+                    )
+                )
+
+            recurring_emotions = list(graph_context.get("recurring_emotions", []))
+            recent_snapshots = await self.graph_api.storage.get_mood_snapshots(user_id, limit=20)
+            selected = choose_best_hypothesis(
+                hypotheses,
+                recurring_emotions=recurring_emotions,
+                text=text,
+                recent_snapshots=recent_snapshots,
+            )
+            llm_nodes = selected.nodes
+            llm_edges = selected.edges
+            graph_context["hypothesis_selected"] = {
+                "name": selected.name,
+                "score": selected.score,
+                "diagnostics": dict(selected.diagnostics),
+            }
+
+            # Keep core structural relations from primary hypothesis if missing.
+            core_relations = {"OWNS_PROJECT", "HAS_VALUE", "HOLDS_BELIEF", "HAS_PART", "HAS_TASK"}
+            selected_relations = {edge.relation for edge in llm_edges}
+            missing = core_relations - selected_relations
+            if missing:
+                keep_node_ids = {n.id for n in llm_nodes}
+                edge_keys = {(e.source_node_id, e.target_node_id, e.relation) for e in llm_edges}
+                for edge in primary_edges:
+                    if edge.relation not in missing:
+                        continue
+                    key = (edge.source_node_id, edge.target_node_id, edge.relation)
+                    if key in edge_keys:
+                        continue
+                    llm_edges.append(edge)
+                    edge_keys.add(key)
+                    keep_node_ids.add(edge.source_node_id)
+                    keep_node_ids.add(edge.target_node_id)
+
+                existing = {n.id: n for n in llm_nodes}
+                for node in primary_nodes:
+                    if node.id in keep_node_ids and node.id not in existing:
+                        llm_nodes.append(node)
+                        existing[node.id] = node
+
+            await self._calibrate_and_annotate_emotions(user_id, llm_nodes)
+            await self.personal_baseline_model.annotate_emotions(user_id, llm_nodes)
+
             logger.info("LLM маппинг: nodes=%d edges=%d", len(llm_nodes), len(llm_edges))
 
             llm_intent = str(parsed.get("intent", "")).upper() or None
@@ -177,6 +254,49 @@ class OrientStage:
         except Exception as exc:
             logger.error("LLM extract_all упал: %s — возвращаем пустой результат", exc)
             return [], [], None
+
+    async def _calibrate_and_annotate_emotions(self, user_id: str, nodes: list[Node]) -> None:
+        recent = await self.graph_api.storage.find_nodes_recent(user_id, node_type="EMOTION", limit=120)
+
+        recent_by_label: dict[str, list[float]] = {}
+        for item in recent:
+            label = str(item.metadata.get("label", "")).strip().lower()
+            if not label:
+                continue
+            ts_raw = item.metadata.get("created_at") or item.created_at
+            age_days = 0.0
+            if isinstance(ts_raw, str):
+                from datetime import datetime, timezone
+
+                try:
+                    dt = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+                    age_days = max((datetime.now(timezone.utc) - dt).total_seconds() / 86400.0, 0.0)
+                except ValueError:
+                    age_days = 0.0
+            recent_by_label.setdefault(label, []).append(age_days)
+
+        for node in nodes:
+            if node.type != "EMOTION":
+                continue
+            label = str(node.metadata.get("label", "")).strip().lower()
+            raw_conf = float(node.metadata.get("confidence", 0.5))
+            calibrated = raw_conf
+            if self.calibrator:
+                calibrated = await self.calibrator.calibrate_confidence(
+                    user_id=user_id,
+                    signal_type=f"emotion:{label or 'unknown'}",
+                    raw_confidence=raw_conf,
+                )
+
+            history_ages = recent_by_label.get(label, [])
+            age = min(history_ages) if history_ages else 365.0
+            t_weight = temporal_weight(age)
+
+            node.metadata["raw_confidence"] = round(raw_conf, 4)
+            node.metadata["confidence"] = round(calibrated, 4)
+            node.metadata["temporal_weight"] = round(t_weight, 4)
+            node.metadata["confidence_weighted"] = round(calibrated * t_weight, 4)
+            node.metadata["calibration_version"] = "ece-brier-v1"
 
     async def _embed_and_save_nodes(self, nodes: list[Node]) -> None:
         if not self.embedding_service:
@@ -216,6 +336,8 @@ class OrientStage:
                 seed_text = embed_candidates[0].text or embed_candidates[0].name or ""
                 if seed_text.strip():
                     first_embedding = await self.embedding_service.embed_text(seed_text)
+                    if first_embedding is None:
+                        return []
                     try:
                         return self.qdrant.search_similar(
                             query_embedding=first_embedding,

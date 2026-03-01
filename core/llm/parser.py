@@ -181,6 +181,29 @@ def map_payload_to_graph(*, user_id: str, person_id: str, data: dict) -> tuple[l
     return nodes, edges
 
 
+def extract_hypotheses_payload(data: dict) -> list[dict]:
+        """Extract optional hypotheses list from LLM payload.
+
+        Expected shape:
+            {
+                "hypotheses": [
+                    {"name": "...", "confidence": 0.6, "rationale": "...", "nodes": [...], "edges": [...]}
+                ]
+            }
+        """
+        raw = data.get("hypotheses")
+        if not isinstance(raw, list):
+                return []
+        result: list[dict] = []
+        for item in raw[:5]:
+                if not isinstance(item, dict):
+                        continue
+                if not isinstance(item.get("nodes"), list) or not isinstance(item.get("edges"), list):
+                        continue
+                result.append(item)
+        return result
+
+
 def _log_reasoning_block(data: dict) -> None:
     reasoning = data.get("_reasoning")
     if not isinstance(reasoning, dict):

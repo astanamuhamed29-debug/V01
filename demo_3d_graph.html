@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SELF-OS: 3D Memory + Emotion State</title>
+    <style>
+        body { margin: 0; padding: 0; background-color: #050510; color: white; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; overflow: hidden; }
+        #toolbar { position: absolute; top: 16px; right: 16px; z-index: 12; display: flex; gap: 8px; }
+        .btn { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.25); color: #fff; padding: 8px 12px; border-radius: 8px; cursor: pointer; }
+        .btn.active { background: rgba(75,139,255,0.35); border-color: rgba(75,139,255,0.8); }
+        #memory-3d, #emotion-3d { width: 100vw; height: 100vh; display: none; }
+        #memory-3d.active, #emotion-3d.active { display: block; }
+        #ui-overlay { position: absolute; top: 20px; left: 20px; pointer-events: none; z-index: 10; background: rgba(10,10,25,0.7); padding: 20px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); max-width: 420px; }
+        h1 { margin: 0 0 10px 0; font-size: 24px; letter-spacing: 1px; font-weight: 300; }
+        .legend-item { display: flex; align-items: center; margin-bottom: 8px; font-size: 14px; opacity: 0.9; }
+        .color-box { width: 12px; height: 12px; border-radius: 50%; margin-right: 10px; box-shadow: 0 0 8px currentColor; }
+        .stats { margin-top: 20px; font-size: 13px; color: #aaa; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px; }
+    </style>
+    <script src="https://unpkg.com/3d-force-graph"></script>
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+</head>
+<body>
+    <div id="toolbar">
+        <button id="btn-memory" class="btn active">Memory Graph 3D</button>
+        <button id="btn-emotion" class="btn">Emotion State 3D</button>
+    </div>
+    <div id="ui-overlay">
+        <h1>SELF-OS: 3D Visualizer</h1>
+        <div id="legend"></div>
+        <div class="stats">
+            Nodes: 13<br>
+            Edges: 14<br>
+            Emotions: 5
+        </div>
+    </div>
+    <div id="memory-3d" class="active"></div>
+    <div id="emotion-3d"></div>
+
+    <script>
+        const gData = {"nodes": [{"id": "dc60d3a2-b3b0-4a45-8f5d-3dd09cd6607f", "name": "[PERSON] person:me", "group": "PERSON", "color": "#4bffff", "val": 5.5}, {"id": "b89d08a7-d871-493f-9150-b9f557975655", "name": "[EVENT] event:demo:1", "group": "EVENT", "color": "#4bff8b", "val": 1.5}, {"id": "125bdfac-880c-4f95-a950-827ba59afed5", "name": "[EMOTION] emotion:\u0442\u0440\u0435\u0432\u043e\u0433\u0430:demo:1:1", "group": "EMOTION", "color": "#ff4b4b", "val": 2.0}, {"id": "0e22eed7-eb30-4ce3-af5b-dbd8afec1a2b", "name": "[NEED] \u042d\u043c\u043e\u0446\u0438\u044f \u0442\u0440\u0435\u0432\u043e\u0433\u0430 \u0441\u0438\u0433\u043d\u0430\u043b\u0438\u0437\u0438\u0440\u0443\u0435\u0442 \u043f\u043e\u0442\u0440\u0435\u0431\u043d\u043e\u0441\u0442\u044c: \u0431\u0435\u0437\u043e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u044c", "group": "NEED", "color": "#ff9d00", "val": 2.5}, {"id": "827750a8-a2da-43aa-801a-6c0c9e2c6554", "name": "[EMOTION] emotion:\u0441\u0442\u044b\u0434:demo:1:2", "group": "EMOTION", "color": "#ff4b4b", "val": 2.0}, {"id": "cc6cee5f-0832-412e-9fb7-e906863b4584", "name": "[NEED] \u042d\u043c\u043e\u0446\u0438\u044f \u0441\u0442\u044b\u0434 \u0441\u0438\u0433\u043d\u0430\u043b\u0438\u0437\u0438\u0440\u0443\u0435\u0442 \u043f\u043e\u0442\u0440\u0435\u0431\u043d\u043e\u0441\u0442\u044c: \u043f\u0440\u0438\u043d\u044f\u0442\u0438\u0435", "group": "NEED", "color": "#ff9d00", "val": 1.5}, {"id": "48810217-c4cf-4d17-8310-f931f10333cf", "name": "[EVENT] event:demo:2", "group": "EVENT", "color": "#4bff8b", "val": 1.5}, {"id": "c427427d-b8d1-4f60-8aa6-671799a7a4db", "name": "[EMOTION] emotion:\u0442\u0440\u0435\u0432\u043e\u0433\u0430:demo:2:1", "group": "EMOTION", "color": "#ff4b4b", "val": 2.0}, {"id": "d3661b4c-0674-4d80-ad05-02bacefd4058", "name": "[EVENT] event:demo:3", "group": "EVENT", "color": "#4bff8b", "val": 1.5}, {"id": "1c33716f-f206-4ed6-9f1a-7eed256ffcb3", "name": "[EMOTION] emotion:\u0441\u043f\u043e\u043a\u043e\u0439\u0441\u0442\u0432\u0438\u0435:demo:3:1", "group": "EMOTION", "color": "#ff4b4b", "val": 2.0}, {"id": "d9a69438-0942-43c9-b834-d75291be52fb", "name": "[NEED] \u042d\u043c\u043e\u0446\u0438\u044f \u0441\u043f\u043e\u043a\u043e\u0439\u0441\u0442\u0432\u0438\u0435 \u0441\u0438\u0433\u043d\u0430\u043b\u0438\u0437\u0438\u0440\u0443\u0435\u0442 \u043f\u043e\u0442\u0440\u0435\u0431\u043d\u043e\u0441\u0442\u044c: \u0441\u0442\u0430\u0431\u0438\u043b\u044c\u043d\u043e\u0441\u0442\u044c", "group": "NEED", "color": "#ff9d00", "val": 1.5}, {"id": "a990526b-79f9-4fb9-9bf2-6be2833f2302", "name": "[EVENT] event:demo:4", "group": "EVENT", "color": "#4bff8b", "val": 1.5}, {"id": "21acd38c-99d0-4466-b4b2-f84db9257e14", "name": "[EMOTION] emotion:\u0442\u0440\u0435\u0432\u043e\u0433\u0430:demo:4:1", "group": "EMOTION", "color": "#ff4b4b", "val": 2.0}], "links": [{"source": "125bdfac-880c-4f95-a950-827ba59afed5", "target": "0e22eed7-eb30-4ce3-af5b-dbd8afec1a2b", "name": "SIGNALS_NEED"}, {"source": "1c33716f-f206-4ed6-9f1a-7eed256ffcb3", "target": "d9a69438-0942-43c9-b834-d75291be52fb", "name": "SIGNALS_NEED"}, {"source": "21acd38c-99d0-4466-b4b2-f84db9257e14", "target": "0e22eed7-eb30-4ce3-af5b-dbd8afec1a2b", "name": "SIGNALS_NEED"}, {"source": "827750a8-a2da-43aa-801a-6c0c9e2c6554", "target": "cc6cee5f-0832-412e-9fb7-e906863b4584", "name": "SIGNALS_NEED"}, {"source": "c427427d-b8d1-4f60-8aa6-671799a7a4db", "target": "0e22eed7-eb30-4ce3-af5b-dbd8afec1a2b", "name": "SIGNALS_NEED"}, {"source": "dc60d3a2-b3b0-4a45-8f5d-3dd09cd6607f", "target": "125bdfac-880c-4f95-a950-827ba59afed5", "name": "FEELS"}, {"source": "dc60d3a2-b3b0-4a45-8f5d-3dd09cd6607f", "target": "1c33716f-f206-4ed6-9f1a-7eed256ffcb3", "name": "FEELS"}, {"source": "dc60d3a2-b3b0-4a45-8f5d-3dd09cd6607f", "target": "21acd38c-99d0-4466-b4b2-f84db9257e14", "name": "FEELS"}, {"source": "dc60d3a2-b3b0-4a45-8f5d-3dd09cd6607f", "target": "48810217-c4cf-4d17-8310-f931f10333cf", "name": "DESCRIBES_EVENT"}, {"source": "dc60d3a2-b3b0-4a45-8f5d-3dd09cd6607f", "target": "827750a8-a2da-43aa-801a-6c0c9e2c6554", "name": "FEELS"}, {"source": "dc60d3a2-b3b0-4a45-8f5d-3dd09cd6607f", "target": "a990526b-79f9-4fb9-9bf2-6be2833f2302", "name": "DESCRIBES_EVENT"}, {"source": "dc60d3a2-b3b0-4a45-8f5d-3dd09cd6607f", "target": "b89d08a7-d871-493f-9150-b9f557975655", "name": "DESCRIBES_EVENT"}, {"source": "dc60d3a2-b3b0-4a45-8f5d-3dd09cd6607f", "target": "c427427d-b8d1-4f60-8aa6-671799a7a4db", "name": "FEELS"}, {"source": "dc60d3a2-b3b0-4a45-8f5d-3dd09cd6607f", "target": "d3661b4c-0674-4d80-ad05-02bacefd4058", "name": "DESCRIBES_EVENT"}]};
+        const emotionData = [{"i": 0, "t": "2026-03-01T16:22:02.999599+00:00", "label": "\u0442\u0440\u0435\u0432\u043e\u0433\u0430", "valence": -0.65, "arousal": 0.75, "color": "#ff4b4b"}, {"i": 1, "t": "2026-03-01T16:22:03.013212+00:00", "label": "\u0441\u0442\u044b\u0434", "valence": -0.7, "arousal": 0.35, "color": "#ff4b4b"}, {"i": 2, "t": "2026-03-01T16:22:03.032825+00:00", "label": "\u0442\u0440\u0435\u0432\u043e\u0433\u0430", "valence": -0.65, "arousal": 0.75, "color": "#ff4b4b"}, {"i": 3, "t": "2026-03-01T16:22:03.050199+00:00", "label": "\u0441\u043f\u043e\u043a\u043e\u0439\u0441\u0442\u0432\u0438\u0435", "valence": 0.45, "arousal": -0.45, "color": "#ff4b4b"}, {"i": 4, "t": "2026-03-01T16:22:03.069287+00:00", "label": "\u0442\u0440\u0435\u0432\u043e\u0433\u0430", "valence": -0.65, "arousal": 0.75, "color": "#ff4b4b"}];
+        const colors = {"EMOTION": "#ff4b4b", "THOUGHT": "#4b8bff", "EVENT": "#4bff8b", "VALUE": "#ffd700", "NEED": "#ff9d00", "PART": "#b84bff", "BELIEF": "#ff4bed", "PERSON": "#4bffff", "INSIGHT": "#ffffff", "SOMA": "#ffb84b", "ACTION": "#a0a0a0", "GOAL": "#ffff00", "PROJECT": "#00ff00", "TASK": "#88ff88"};
+        
+        // Build legend
+        const legend = document.getElementById('legend');
+        const usedGroups = new Set(gData.nodes.map(n => n.group));
+        
+        Array.from(usedGroups).sort().forEach(group => {
+            const color = colors[group] || '#888888';
+            const item = document.createElement('div');
+            item.className = 'legend-item';
+            item.innerHTML = `<div class="color-box" style="background-color: ${color}; color: ${color};"></div>${group}`;
+            legend.appendChild(item);
+        });
+
+        // Initialize Force Graph 3D (memory)
+        const Graph = ForceGraph3D()(document.getElementById('memory-3d'))
+            .graphData(gData)
+            .nodeLabel('name')
+            .nodeColor('color')
+            .nodeVal('val')
+            .nodeOpacity(0.9)
+            .linkDirectionalArrowLength(3.5)
+            .linkDirectionalArrowRelPos(1)
+            .linkColor(() => 'rgba(255,255,255,0.2)')
+            .linkWidth(0.5)
+            .backgroundColor('#050510')
+            .onNodeHover(node => document.body.style.cursor = node ? 'pointer' : null);
+
+        // Auto-rotation around the center
+        let angle = 0;
+        const distance = 400;
+        setInterval(() => {
+            angle += Math.PI / 2000;
+            Graph.cameraPosition({
+                x: distance * Math.sin(angle),
+                z: distance * Math.cos(angle)
+            });
+        }, 10);
+
+        // Emotional state 3D (Plotly)
+        const emotionX = emotionData.map(e => e.i);
+        const emotionY = emotionData.map(e => e.valence);
+        const emotionZ = emotionData.map(e => e.arousal);
+        const emotionText = emotionData.map(e => `${e.label}<br>${e.t}`);
+
+        const emotionTrace = {
+            type: 'scatter3d',
+            mode: 'lines+markers',
+            x: emotionX,
+            y: emotionY,
+            z: emotionZ,
+            text: emotionText,
+            hovertemplate: 'idx=%{x}<br>valence=%{y:.2f}<br>arousal=%{z:.2f}<br>%{text}<extra></extra>',
+            line: { color: '#ff8888', width: 6 },
+            marker: { size: 5, color: '#ff4b4b' },
+            name: 'Emotion Trajectory'
+        };
+
+        const emotionLayout = {
+            paper_bgcolor: '#050510',
+            plot_bgcolor: '#050510',
+            font: { color: '#ffffff' },
+            margin: { l: 0, r: 0, b: 0, t: 0 },
+            scene: {
+                xaxis: { title: 'Time Index' },
+                yaxis: { title: 'Valence', range: [-1, 1] },
+                zaxis: { title: 'Arousal', range: [-1, 1] },
+                bgcolor: '#050510'
+            }
+        };
+
+        Plotly.newPlot('emotion-3d', [emotionTrace], emotionLayout, { responsive: true });
+
+        // Animate emotion timeline cursor
+        if (emotionData.length > 0) {
+            let emotionFrame = 1;
+            setInterval(() => {
+                emotionFrame = (emotionFrame % emotionData.length) + 1;
+                Plotly.restyle('emotion-3d', {
+                    x: [emotionX.slice(0, emotionFrame)],
+                    y: [emotionY.slice(0, emotionFrame)],
+                    z: [emotionZ.slice(0, emotionFrame)],
+                    text: [emotionText.slice(0, emotionFrame)]
+                });
+            }, 700);
+        }
+
+        // View switching
+        const btnMemory = document.getElementById('btn-memory');
+        const btnEmotion = document.getElementById('btn-emotion');
+        const memoryView = document.getElementById('memory-3d');
+        const emotionView = document.getElementById('emotion-3d');
+
+        btnMemory.addEventListener('click', () => {
+            btnMemory.classList.add('active');
+            btnEmotion.classList.remove('active');
+            memoryView.classList.add('active');
+            emotionView.classList.remove('active');
+        });
+
+        btnEmotion.addEventListener('click', () => {
+            btnEmotion.classList.add('active');
+            btnMemory.classList.remove('active');
+            emotionView.classList.add('active');
+            memoryView.classList.remove('active');
+        });
+    </script>
+</body>
+</html>
