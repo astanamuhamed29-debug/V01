@@ -88,7 +88,14 @@ _UNCERTAINTY_WORDS: frozenset[str] = frozenset({
 
 @dataclass(slots=True)
 class EmotionSignal:
-    """Single emotion detected in a message."""
+    """Single emotion detected in a message.
+
+    Extended with 3-model hybrid emotion vector:
+    - **Appraisal** (Scherer CPM 2009): 6 cognitive evaluation dimensions
+    - **Hourglass** (Cambria 2024): 4 bipolar sentic dimensions
+    - **BIS/BAS** (Gray 2000): approach–avoidance motivational axis
+    - **Duration**: temporal class (acute|episodic|chronic|trait)
+    """
 
     label: str
     valence: float
@@ -102,6 +109,21 @@ class EmotionSignal:
     cause: str | None = None
     multi_labels: list[str] = field(default_factory=list)
     ambivalent: bool = False
+
+    # ── Appraisal Theory (Scherer CPM) ──────────────────────────
+    appraisal: dict[str, float] = field(default_factory=dict)
+    # Keys: novelty, goal_relevance, coping_potential,
+    #        norm_compat, self_agency, other_agency   (each 0..1)
+
+    # ── Hourglass of Emotions (Cambria) ─────────────────────────
+    hourglass: dict[str, float] = field(default_factory=dict)
+    # Keys: pleasantness, attention, sensitivity, aptitude  (each -1..1)
+
+    # ── BIS/BAS approach–avoidance (Gray) ───────────────────────
+    approach_avoid: float = 0.0   # -1 = pure avoidance, +1 = pure approach
+
+    # ── Temporal class ──────────────────────────────────────────
+    duration: str = "acute"       # "acute"|"episodic"|"chronic"|"trait"
 
     def to_metadata(self) -> dict[str, Any]:
         meta: dict[str, Any] = {
@@ -121,6 +143,13 @@ class EmotionSignal:
             meta["multi_labels"] = self.multi_labels
         if self.ambivalent:
             meta["ambivalent"] = True
+        # ── Extended emotion vector ─────────────────────────────
+        if self.appraisal:
+            meta["appraisal"] = {k: round(v, 3) for k, v in self.appraisal.items()}
+        if self.hourglass:
+            meta["hourglass"] = {k: round(v, 3) for k, v in self.hourglass.items()}
+        meta["approach_avoid"] = round(self.approach_avoid, 3)
+        meta["duration"] = self.duration
         return meta
 
 
@@ -148,6 +177,101 @@ _VAD_NORMS: dict[str, tuple[float, float, float, float]] = {
 def _vad(label: str) -> tuple[float, float, float, float]:
     """Look up VAD + intensity from research norms."""
     return _VAD_NORMS.get(label, (0.0, 0.0, 0.0, 0.5))
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Appraisal Theory norms (Scherer CPM, 2009)
+# ═══════════════════════════════════════════════════════════════════
+# Each dimension ∈ [0..1]:
+#   novelty         — how unexpected / new the stimulus is
+#   goal_relevance  — how much it matters for personal goals
+#   coping_potential — perceived ability to handle the situation
+#   norm_compat     — moral / social norm compatibility
+#   self_agency     — how much the person caused it themselves
+#   other_agency    — how much others / external forces caused it
+
+_APPRAISAL_NORMS: dict[str, dict[str, float]] = {
+    "страх":        {"novelty": 0.8, "goal_relevance": 0.9, "coping_potential": 0.2,
+                     "norm_compat": 0.5, "self_agency": 0.2, "other_agency": 0.6},
+    "стыд":         {"novelty": 0.4, "goal_relevance": 0.8, "coping_potential": 0.2,
+                     "norm_compat": 0.2, "self_agency": 0.8, "other_agency": 0.3},
+    "усталость":    {"novelty": 0.1, "goal_relevance": 0.5, "coping_potential": 0.3,
+                     "norm_compat": 0.5, "self_agency": 0.4, "other_agency": 0.1},
+    "злость":       {"novelty": 0.5, "goal_relevance": 0.9, "coping_potential": 0.7,
+                     "norm_compat": 0.2, "self_agency": 0.3, "other_agency": 0.8},
+    "вина":         {"novelty": 0.3, "goal_relevance": 0.8, "coping_potential": 0.3,
+                     "norm_compat": 0.2, "self_agency": 0.9, "other_agency": 0.1},
+    "обида":        {"novelty": 0.4, "goal_relevance": 0.8, "coping_potential": 0.3,
+                     "norm_compat": 0.2, "self_agency": 0.2, "other_agency": 0.8},
+    "грусть":       {"novelty": 0.2, "goal_relevance": 0.7, "coping_potential": 0.2,
+                     "norm_compat": 0.5, "self_agency": 0.3, "other_agency": 0.2},
+    "радость":      {"novelty": 0.6, "goal_relevance": 0.9, "coping_potential": 0.9,
+                     "norm_compat": 0.7, "self_agency": 0.7, "other_agency": 0.3},
+    "ступор":       {"novelty": 0.7, "goal_relevance": 0.6, "coping_potential": 0.1,
+                     "norm_compat": 0.5, "self_agency": 0.1, "other_agency": 0.2},
+    "отвращение":   {"novelty": 0.5, "goal_relevance": 0.7, "coping_potential": 0.6,
+                     "norm_compat": 0.2, "self_agency": 0.3, "other_agency": 0.5},
+    "надежда":      {"novelty": 0.5, "goal_relevance": 0.8, "coping_potential": 0.7,
+                     "norm_compat": 0.6, "self_agency": 0.6, "other_agency": 0.3},
+    "одиночество":  {"novelty": 0.2, "goal_relevance": 0.8, "coping_potential": 0.2,
+                     "norm_compat": 0.5, "self_agency": 0.3, "other_agency": 0.1},
+}
+
+_APPRAISAL_DEFAULT: dict[str, float] = {
+    "novelty": 0.5, "goal_relevance": 0.5, "coping_potential": 0.5,
+    "norm_compat": 0.5, "self_agency": 0.5, "other_agency": 0.5,
+}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Hourglass of Emotions norms (Cambria, SenticNet 7, 2024)
+# ═══════════════════════════════════════════════════════════════════
+# 4 bipolar dimensions, each ∈ [-1..+1]:
+#   pleasantness  — joy ↔ sadness
+#   attention     — anticipation ↔ surprise
+#   sensitivity   — anger ↔ fear
+#   aptitude      — trust ↔ disgust
+
+_HOURGLASS_NORMS: dict[str, dict[str, float]] = {
+    "страх":        {"pleasantness": -0.7, "attention":  0.5, "sensitivity": -0.8, "aptitude": -0.3},
+    "стыд":         {"pleasantness": -0.8, "attention": -0.3, "sensitivity": -0.5, "aptitude": -0.6},
+    "усталость":    {"pleasantness": -0.4, "attention": -0.6, "sensitivity": -0.2, "aptitude": -0.3},
+    "злость":       {"pleasantness": -0.7, "attention":  0.6, "sensitivity":  0.8, "aptitude": -0.4},
+    "вина":         {"pleasantness": -0.7, "attention": -0.2, "sensitivity": -0.4, "aptitude": -0.5},
+    "обида":        {"pleasantness": -0.7, "attention":  0.3, "sensitivity":  0.5, "aptitude": -0.5},
+    "грусть":       {"pleasantness": -0.8, "attention": -0.4, "sensitivity": -0.3, "aptitude": -0.3},
+    "радость":      {"pleasantness":  0.8, "attention":  0.3, "sensitivity":  0.2, "aptitude":  0.6},
+    "ступор":       {"pleasantness": -0.3, "attention": -0.5, "sensitivity": -0.6, "aptitude": -0.4},
+    "отвращение":   {"pleasantness": -0.6, "attention":  0.2, "sensitivity":  0.3, "aptitude": -0.8},
+    "надежда":      {"pleasantness":  0.5, "attention":  0.4, "sensitivity":  0.1, "aptitude":  0.5},
+    "одиночество":  {"pleasantness": -0.7, "attention": -0.3, "sensitivity": -0.4, "aptitude": -0.4},
+}
+
+_HOURGLASS_DEFAULT: dict[str, float] = {
+    "pleasantness": 0.0, "attention": 0.0, "sensitivity": 0.0, "aptitude": 0.0,
+}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# BIS/BAS approach–avoidance norms (Gray, 2000)
+# ═══════════════════════════════════════════════════════════════════
+# Single axis ∈ [-1..+1]:  -1 = pure avoidance (BIS/FFFS)
+#                           +1 = pure approach  (BAS)
+
+_APPROACH_AVOID_NORMS: dict[str, float] = {
+    "страх": -0.8,  "стыд": -0.6,  "усталость": -0.4,
+    "злость":  0.5,  "вина": -0.5,  "обида":     -0.3,
+    "грусть": -0.5,  "радость": 0.7, "ступор":   -0.7,
+    "отвращение": -0.4, "надежда": 0.6, "одиночество": -0.5,
+}
+
+
+def _get_emotion_profile(label: str) -> tuple[dict[str, float], dict[str, float], float]:
+    """Return (appraisal, hourglass, approach_avoid) for a known emotion label."""
+    appraisal = _APPRAISAL_NORMS.get(label, _APPRAISAL_DEFAULT).copy()
+    hourglass = _HOURGLASS_NORMS.get(label, _HOURGLASS_DEFAULT).copy()
+    approach_avoid = _APPROACH_AVOID_NORMS.get(label, 0.0)
+    return appraisal, hourglass, approach_avoid
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -303,12 +427,14 @@ def _detect_emotions(lowered: str) -> list[EmotionSignal]:
             emo = _emotion_from_word(token)
             if emo and emo[0] not in seen:
                 seen.add(emo[0])
+                apr, hg, aa = _get_emotion_profile(emo[0])
                 detected.append(EmotionSignal(
                     label=emo[0], valence=emo[1], arousal=emo[2],
                     dominance=emo[3], intensity=emo[4],
                     confidence=_BASE_CONFIDENCE, source="regex",
                     cause=cause, sarcasm=sarcasm,
                     multi_labels=_LABEL_TO_GOEMOTION.get(emo[0], []),
+                    appraisal=apr, hourglass=hg, approach_avoid=aa,
                 ))
 
     # ── Main pattern matching with context analysis ─────────────
@@ -332,12 +458,14 @@ def _detect_emotions(lowered: str) -> list[EmotionSignal]:
         intensity = min(base_intensity * intensity_mult, 1.0)
 
         seen.add(label)
+        apr, hg, aa = _get_emotion_profile(label)
         detected.append(EmotionSignal(
             label=label, valence=v, arousal=a,
             dominance=d, intensity=round(intensity, 3),
             confidence=round(confidence, 3), source="regex",
             cause=cause, sarcasm=sarcasm,
             multi_labels=_LABEL_TO_GOEMOTION.get(label, []),
+            appraisal=apr, hourglass=hg, approach_avoid=aa,
         ))
 
     return detected
@@ -433,6 +561,7 @@ async def _model_predict(
         a = norms[1] * blend + a_interp * (1 - blend)
         d = norms[2] * blend + d_interp * (1 - blend)
 
+        apr, hg, aa = _get_emotion_profile(label)
         results.append(EmotionSignal(
             label=label,
             valence=round(v, 3), arousal=round(a, 3), dominance=round(d, 3),
@@ -440,6 +569,7 @@ async def _model_predict(
             confidence=round(confidence, 3),
             source="model",
             multi_labels=_LABEL_TO_GOEMOTION.get(label, []),
+            appraisal=apr, hourglass=hg, approach_avoid=aa,
         ))
 
     return results
@@ -463,7 +593,23 @@ JSON (и ТОЛЬКО JSON, без markdown) со следующей струк�
       "confidence": <float 0..1>,
       "cause": "<причина или null>",
       "sarcasm": <bool>,
-      "implicit": <bool>
+      "implicit": <bool>,
+      "appraisal": {
+        "novelty": <float 0..1>,
+        "goal_relevance": <float 0..1>,
+        "coping_potential": <float 0..1>,
+        "norm_compat": <float 0..1>,
+        "self_agency": <float 0..1>,
+        "other_agency": <float 0..1>
+      },
+      "hourglass": {
+        "pleasantness": <float -1..1>,
+        "attention": <float -1..1>,
+        "sensitivity": <float -1..1>,
+        "aptitude": <float -1..1>
+      },
+      "approach_avoid": <float -1..1>,
+      "duration": "acute|episodic|chronic|trait"
     }
   ]
 }
@@ -472,6 +618,17 @@ JSON (и ТОЛЬКО JSON, без markdown) со следующей струк�
 - implicit=true если эмоция не названа прямо, а следует из контекста
 - Учитывай предыдущие реплики (контекст) при оценке
 - Если текст нейтральный — верни пустой массив emotions
+- appraisal: когнитивная оценка ситуации (Scherer CPM):
+  novelty=насколько неожиданно, goal_relevance=насколько важно для целей,
+  coping_potential=способность справиться, norm_compat=соответствие нормам,
+  self_agency=я причина, other_agency=внешние причины
+- hourglass: сентические оси (Cambria SenticNet):
+  pleasantness=радость/-грусть, attention=ожидание/-удивление,
+  sensitivity=злость/-страх, aptitude=доверие/-отвращение
+- approach_avoid: мотивационная ось (Gray BIS/BAS):
+  -1=избегание(BIS/FFFS), +1=приближение(BAS)
+- duration: временная классификация эмоции:
+  acute=моментная, episodic=периодическая, chronic=хроническая, trait=черта личности
 """
 
 
@@ -515,8 +672,20 @@ async def _llm_arbitrate(
     for item in emotions_raw[:3]:
         if not isinstance(item, dict) or "label" not in item:
             continue
+        lbl = str(item["label"])
+        # Parse extended vector from LLM or fall back to canonical norms
+        raw_apr = item.get("appraisal", {})
+        raw_hg = item.get("hourglass", {})
+        canonical_apr, canonical_hg, canonical_aa = _get_emotion_profile(lbl)
+        # Merge: LLM values override canonical defaults
+        apr = {k: float(raw_apr.get(k, canonical_apr[k])) for k in canonical_apr}
+        hg = {k: float(raw_hg.get(k, canonical_hg[k])) for k in canonical_hg}
+        aa = float(item.get("approach_avoid", canonical_aa))
+        dur = str(item.get("duration", "acute"))
+        if dur not in ("acute", "episodic", "chronic", "trait"):
+            dur = "acute"
         signals.append(EmotionSignal(
-            label=str(item["label"]),
+            label=lbl,
             valence=float(item.get("valence", 0)),
             arousal=float(item.get("arousal", 0)),
             dominance=float(item.get("dominance", 0)),
@@ -526,7 +695,9 @@ async def _llm_arbitrate(
             implicit=bool(item.get("implicit", False)),
             sarcasm=bool(item.get("sarcasm", False)),
             cause=item.get("cause"),
-            multi_labels=_LABEL_TO_GOEMOTION.get(str(item["label"]), []),
+            multi_labels=_LABEL_TO_GOEMOTION.get(lbl, []),
+            appraisal=apr, hourglass=hg,
+            approach_avoid=aa, duration=dur,
         ))
 
     return signals
@@ -778,10 +949,11 @@ async def extract(
     )
     if body_match:
         location = body_match.group(1)
+        soma_key = f"soma:{location.replace(' ', '_')}:{now_iso[:10]}"
         soma = Node(
             user_id=user_id,
             type="SOMA",
-            key=None,
+            key=soma_key,
             metadata={"location": location, "sensation": "tension"},
         )
         nodes.append(soma)

@@ -146,6 +146,11 @@ def map_payload_to_graph(*, user_id: str, person_id: str, data: dict) -> tuple[l
             label = str(node.metadata.get("label", "unknown"))
             today = date.today().isoformat()
             node.key = f"emotion:{label}:{today}"
+        if node.type == "SOMA" and not node.key:
+            location = str(node.metadata.get("location", "body")).strip().lower().replace(" ", "_")
+            sensation = str(node.metadata.get("sensation", "signal")).strip().lower().replace(" ", "_")
+            today = date.today().isoformat()
+            node.key = f"soma:{location}:{sensation}:{today}"
 
         nodes.append(node)
         ref_map[temp_id] = node.id

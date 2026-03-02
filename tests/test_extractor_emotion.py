@@ -322,6 +322,8 @@ def test_extract_soma_node_created():
         soma_nodes = [n for n in nodes if n.type == "SOMA"]
         assert len(soma_nodes) == 1
         assert soma_nodes[0].metadata["location"] == "в груди"
+        assert soma_nodes[0].key is not None
+        assert str(soma_nodes[0].key).startswith("soma:")
 
     asyncio.run(scenario())
 

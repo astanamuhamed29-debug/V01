@@ -44,3 +44,17 @@ def test_parser_with_reasoning_block(caplog):
     assert data["intent"] == "FEELING_REPORT"
     assert "_reasoning" in data
     assert "Extractor reasoning block" in caplog.text
+
+
+def test_map_generates_soma_key_when_missing():
+    data = {
+        "nodes": [
+            {"id": "s1", "type": "SOMA", "metadata": {"location": "грудь", "sensation": "тяжесть"}},
+        ],
+        "edges": [],
+    }
+    nodes, _edges = map_payload_to_graph(user_id="u1", person_id="p1", data=data)
+    assert len(nodes) == 1
+    assert nodes[0].type == "SOMA"
+    assert nodes[0].key is not None
+    assert str(nodes[0].key).startswith("soma:")

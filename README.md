@@ -1,185 +1,278 @@
-# SELF-OS (Stage 1)
+# SELF-OS — Personal Cognitive Operating System
 
-Локальное накопительное ядро персонального графа (SELF-Graph) на Python 3.11+.
+**Stage 1: Knowledge Graph Core — Complete**
 
-## Что реализовано
+SELF-OS is an AI-powered personal cognitive operating system that builds and maintains a semantic knowledge graph from natural conversations. It models identity, emotions, beliefs, needs, and behavioral patterns — enabling deep self-awareness and intelligent assistance.
 
-- Приём сообщений через CLI.
-- Raw journal в SQLite (`journal_entries`).
-- Асинхронный pipeline: journal → router → extractors → graph API → reply.
-- SELF-Graph в SQLite (`nodes`, `edges`) с upsert по `user_id + type + key`.
-- Неблокирующий доступ к SQLite через `aiosqlite`.
-- Минимальные эвристики:
-  - `NOTE` создаётся всегда.
-  - `TASK` по словам вроде «надо/нужно/сделать/хочу».
-  - `PROJECT(SELF-OS)` по ключам вроде `SELF-OS`.
-  - `BELIEF` по фразам «я боюсь...», «я не вывезу...», «мне кажется, что я...».
-  - `EMOTION`/`SOMA` — простые сигналы.
+## Recent Updates (March 2026)
+
+- Added **L2 AnalysisEngine** (`core/analytics/analysis_engine.py`) with strict schema validation, fallback safety path, and fusion/provenance outputs.
+- Implemented **true hybrid fusion** (semantic + statistical) with pair deduplication, merged evidence refs, and conflict-aware direction handling.
+- Added **async L2 scheduling** in `MessageProcessor` and dedicated SQLite persistence table `l2_analysis_artifacts`.
+- Enabled **LLM causal validation** in frontier analytics path (`CAUSAL_VALIDATE_WITH_LLM=true` by default).
+- Improved reliability with **LLM retry + JSON repair** before fallback.
+- Fixed extractor consistency: **SOMA keys are now deterministic and non-null** (regex + LLM parser paths).
+- Added integration/report tooling for 7-message full-system diagnostics:
+    - `scripts/run_7sms_full_report.py`
+    - `scripts/print_7sms_summary.py`
+
+Validation highlights:
+- `tests/test_analysis_engine.py`
+- `tests/test_processor_l2_scheduler.py`
+- `tests/test_simulation_dialogue.py`
 
 ---
 
-## Architecture Overview
+## Key Capabilities
+
+| Capability | Description |
+|---|---|
+| **OODA Pipeline** | Observe → Orient → Decide → Act loop for intelligent message processing |
+| **Knowledge Graph** | Typed semantic graph (BELIEF, EMOTION, NEED, VALUE, PART, PROJECT, TASK, …) |
+| **IFS Parts Tracking** | Internal Family Systems sub-personality detection and history |
+| **Mood Monitoring** | VAD-model emotional snapshots with trend analysis |
+| **Cognitive Distortion Detection** | CBT-based automatic distortion identification |
+| **Memory Lifecycle** | Consolidation → Abstraction → Forgetting with spaced repetition |
+| **Belief Reconsolidation** | Automatic detection and resolution of contradictory beliefs |
+| **RLHF Policy Learning** | Thompson Sampling for adaptive response strategies |
+| **RAG Retrieval** | Graph-aware retrieval-augmented generation with hybrid search |
+| **Proactive Scheduling** | Background signals for check-ins, reflections, and reminders |
+| **Multi-Modal Input** | Whisper transcription + GPT-4V vision analysis |
+| **Event Sourcing** | Immutable audit log for all graph mutations |
+| **Identity Snapshots** | Periodic identity state diffing with narrative generation |
+| **Graph Analytics** | PageRank, causal discovery, GNN link prediction, contrastive learning |
+
+---
+
+## Architecture
 
 ```
-User Message
-    │
-    ▼
-[Journal Storage]  ──► raw SQLite journal_entries
-    │
-    ▼
-[Router]  ──► intent classification (regex)
-    │
-    ├──► [LLM Extractor]  (OpenRouter / Qwen)
-    │         └──► parse_json_payload → map_payload_to_graph
-    │
-    └──► [Regex Extractors]  (fallback)
-              ├── extractor_semantic
-              ├── extractor_emotion
-              └── extractor_parts
-    │
-    ▼
-[Graph API]  ──► upsert nodes & edges → SELF-Graph (SQLite)
-    │
-    ├──► [Embedding Service]  → dense vectors stored per node
-    ├──► [Mood Tracker]       → mood_snapshots
-    ├──► [Parts Memory]       → IFS Part appearances
-    └──► [Context Builder]    → graph_context dict
-    │
-    ▼
-[Reply Generator]  ──► final response to user
+┌──────────────────────────────────────────────────────────────┐
+│                      INTERFACES                              │
+│   Telegram Bot (aiogram)  │  CLI REPL  │  processor_factory  │
+└──────────────┬────────────┴──────┬─────┴─────────────────────┘
+               │    build_processor()      │
+               ▼                           ▼
+┌──────────────────────────────────────────────────────────────┐
+│              MessageProcessor (OODA Loop)                     │
+│                                                              │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐    │
+│  │ OBSERVE  │→ │  ORIENT  │→ │  DECIDE  │→ │   ACT    │    │
+│  │ sanitize │  │ LLM extr │  │ policy   │  │ reply    │    │
+│  │ journal  │  │ embed    │  │ mood     │  │ session  │    │
+│  │ classify │  │ RAG srch │  │ parts    │  │ events   │    │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘    │
+│                                                              │
+│  Background Analytics (async after reply):                   │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │ CausalDiscovery · GNNPredictor · ContrastiveLearner   │  │
+│  │ Reconsolidation · CognitiveDetector · InsightEngine   │  │
+│  │ SnapshotDiff · NodeImportance (PageRank)              │  │
+│  └────────────────────────────────────────────────────────┘  │
+└──────────────────────────┬───────────────────────────────────┘
+                           │
+┌──────────────────────────▼───────────────────────────────────┐
+│                     STORAGE LAYER                             │
+│  ┌───────────┐  ┌───────────┐  ┌───────────┐                │
+│  │  SQLite   │  │  Qdrant   │  │  Neo4j    │                │
+│  │  (graph)  │  │ (vectors) │  │(optional) │                │
+│  └───────────┘  └───────────┘  └───────────┘                │
+│  EventSourcedGraphStorage (immutable audit log)              │
+│  JournalStorage · PersistentSessionMemory                    │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-### Frontier Features
+**Two execution modes:**
+- **Background** (production): Reply instantly from cached context, run ORIENT+DECIDE+analytics asynchronously
+- **Sync** (tests/CLI): Full sequential pipeline
 
-| Feature | Module |
-|---|---|
-| Multi-Agent Orchestration | `agents/orchestrator.py` |
-| Hybrid Vector Search (Dense + BM25) | `core/search/hybrid_search.py` |
-| Retrieval-Augmented Generation (RAG) | `core/rag/` |
-| Spaced Repetition / Ebbinghaus curves | `core/graph/model.py` |
-| Cognitive Distortion Detector | `core/analytics/cognitive_detector.py` |
-| Session Memory with sliding window | `core/context/session_memory.py` |
-| PageRank-like Graph Analytics | `core/analytics/graph_metrics.py` |
-| Security hardening (text validation) | `core/pipeline/processor.py`, `config.py` |
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentation.
 
 ---
 
-## Документация
+## Quick Start
 
-| Документ | Описание |
-|---|---|
-| [`docs/FRONTIER_VISION_REPORT.md`](docs/FRONTIER_VISION_REPORT.md) | Архитектурная дорожная карта SELF-OS: эволюция от Stage 1 (Passive Knowledge Graph) до Stage 5 (Autonomous Predictive Cognitive System) |
-| [`deploy/VPS_DEPLOY.md`](deploy/VPS_DEPLOY.md) | Пошаговый деплой на VPS |
+### 1. Prerequisites
 
----
+- Python 3.11+
+- [Qdrant](https://qdrant.tech/) (optional — degrades gracefully)
+- OpenRouter API key (for LLM features)
 
-## Запуск CLI
+### 2. Install
 
+```bash
+git clone <repo-url> && cd V999
+python -m venv .venv
+.venv/Scripts/activate        # Windows
+# source .venv/bin/activate   # Linux/macOS
+pip install -e ".[dev]"
+```
+
+### 3. Configure
+
+```bash
+cp .env.example .env
+# Edit .env — set OPENROUTER_API_KEY and TELEGRAM_BOT_TOKEN
+```
+
+See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for all available settings.
+
+### 4. Run
+
+**CLI mode:**
 ```bash
 python main.py
 ```
 
-## LLM (OpenRouter / Qwen)
-
-По умолчанию LLM-путь включен (`SELFOS_USE_LLM=1`).
-
-Переменные окружения:
-
-```env
-OPENROUTER_API_KEY=your_openrouter_key
-OPENROUTER_MODEL_ID=qwen/qwen3.5-flash-02-23
-SELFOS_USE_LLM=1
-```
-
-Чтобы принудительно работать только на regex-экстракторах:
-
-```env
-SELFOS_USE_LLM=0
-```
-
-## Запуск Telegram-бота
-
-1. Установите зависимости:
-
-```bash
-pip install -r requirements.txt
-```
-
-2. Создайте `.env` рядом с `main.py`:
-
-```env
-TELEGRAM_BOT_TOKEN=your_bot_token_here
-```
-
-3. Запустите бота:
-
+**Telegram bot:**
 ```bash
 python -m interfaces.telegram_bot.main
 ```
 
-Команда отчёта в Telegram:
-
-```text
-/report
-```
-
-Бот вернёт недельный срез: mood по `mood_snapshots`, топ частей и активные ценности.
-
-## Development Setup (with Docker)
-
+**Docker:**
 ```bash
-# 1. Copy env template and fill in secrets
-cp .env.example .env
-
-# 2. Build and run
 docker compose up --build
+```
 
-# 3. Or run locally
+### 5. Test
+
+```bash
+pytest
+```
+
+337 tests covering all modules.
+
+---
+
+## Project Structure
+
+```
+V999/
+├── config.py                     # Environment-based configuration
+├── main.py                       # CLI entry point
+├── core/                         # Core engine (all business logic)
+│   ├── analytics/                # Graph analytics & cognitive detection
+│   │   ├── calibrator.py         #   Per-user adaptive thresholds
+│   │   ├── causal_discovery.py   #   Causal relationship inference
+│   │   ├── cognitive_detector.py #   CBT distortion detection
+│   │   ├── contrastive_learner.py#   Contrastive embedding learning
+│   │   ├── gnn_predictor.py      #   GNN-based link prediction
+│   │   ├── graph_metrics.py      #   PageRank & node importance
+│   │   ├── identity_snapshot.py  #   Identity state snapshots
+│   │   ├── pattern_analyzer.py   #   Syndrome & pattern detection
+│   │   └── snapshot_diff.py      #   Identity diffing over time
+│   ├── context/                  # Context management
+│   │   ├── builder.py            #   Graph context assembly
+│   │   ├── persistent_session.py #   SQLite-backed session memory
+│   │   └── session_memory.py     #   In-memory session buffer
+│   ├── graph/                    # Knowledge graph layer
+│   │   ├── model.py              #   Node, Edge dataclasses
+│   │   ├── storage.py            #   SQLite storage (async)
+│   │   ├── api.py                #   High-level CRUD interface
+│   │   ├── event_store.py        #   Event sourcing wrapper
+│   │   ├── neo4j_storage.py      #   Neo4j backend (optional)
+│   │   └── _*_ops.py             #   Storage operation mixins
+│   ├── insights/                 # Rule-based insight generation
+│   ├── journal/                  # Raw message archival
+│   ├── llm/                      # LLM integration (embeddings, prompts)
+│   ├── memory/                   # Memory lifecycle management
+│   ├── mood/                     # VAD mood tracking
+│   ├── parts/                    # IFS parts memory
+│   ├── pipeline/                 # OODA pipeline stages
+│   │   ├── processor.py          #   Main orchestrator
+│   │   ├── stage_observe.py      #   OBSERVE: sanitize + journal
+│   │   ├── stage_orient.py       #   ORIENT: LLM extraction + RAG
+│   │   ├── stage_decide.py       #   DECIDE: policy selection
+│   │   ├── stage_act.py          #   ACT: reply generation
+│   │   ├── multimodal.py         #   Whisper + Vision processing
+│   │   └── router.py             #   Intent classification
+│   ├── rag/                      # Retrieval-Augmented Generation
+│   ├── scheduler/                # Background job scheduling
+│   ├── search/                   # Hybrid vector search
+│   ├── therapy/                  # RLHF policy learning
+│   ├── tools/                    # Extensible tool system
+│   └── utils/                    # Shared math utilities
+├── interfaces/                   # User-facing integrations
+│   ├── processor_factory.py      #   Dependency wiring
+│   ├── cli/                      #   Interactive CLI
+│   └── telegram_bot/             #   Telegram bot (aiogram)
+├── scripts/                      # Dev tools & visualization
+├── tests/                        # 41 test files, 337 tests
+├── docs/                         # Documentation
+└── deploy/                       # Production deployment
+```
+
+---
+
+## Graph Node Types
+
+| Type | Description | Example |
+|---|---|---|
+| `EMOTION` | Emotional state (VAD model) | "тревога" (valence=-0.6, arousal=0.8) |
+| `BELIEF` | Core belief or conviction | "я не справлюсь с большим проектом" |
+| `NEED` | Psychological need | "потребность в автономии" |
+| `VALUE` | Personal value | "честность" |
+| `PART` | IFS sub-personality | "Внутренний Критик" |
+| `PROJECT` | Active project | "SELF-OS" |
+| `TASK` | Action item | "набросать архитектуру" |
+| `GOAL` | Long-term objective | "запустить бизнес" |
+| `EVENT` | Life event | "переезд в другой город" |
+| `THOUGHT` | Cognitive content | "может стоит попробовать" |
+| `INSIGHT` | Generated insight | "паттерн: тревога → избегание" |
+| `PERSON` | Person mention | "мама" |
+
+---
+
+## Key Technologies
+
+- **Python 3.11+** — full async/await architecture
+- **SQLite** (aiosqlite) — primary graph + journal storage
+- **Qdrant** — vector embeddings (text-embedding-3-small, 1536-dim)
+- **Neo4j** — optional graph backend for semantic memory
+- **OpenRouter** — LLM gateway (Qwen 3.5 Flash default)
+- **aiogram 3** — Telegram bot framework
+- **NetworkX** — graph algorithms (PageRank, centrality)
+- **APScheduler** — background job scheduling
+
+---
+
+## Documentation
+
+| Document | Description |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Detailed system architecture and module interactions |
+| [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Complete configuration reference |
+| [docs/FRONTIER_VISION_REPORT.md](docs/FRONTIER_VISION_REPORT.md) | Vision roadmap: Stage 1 → Stage 5 |
+| [deploy/VPS_DEPLOY.md](deploy/VPS_DEPLOY.md) | Production VPS deployment guide |
+
+---
+
+## Development
+
+```bash
+# Install dev dependencies
 pip install -e ".[dev]"
+
+# Run tests
 pytest
+
+# Lint
+ruff check .
+
+# Type check
+mypy core/
 ```
 
-### Pre-commit hooks
+### Contributing
 
-```bash
-pip install pre-commit
-pre-commit install
-```
+1. Fork → feature branch → PR against `main`
+2. All tests must pass (`pytest`)
+3. Every public class/function must have a docstring
+4. New features must include unit tests
 
-## Деплой на VPS
+---
 
-Готовые production-артефакты:
+## License
 
-- `deploy/.env.vps.example`
-- `deploy/systemd/self-os-bot.service`
-- `deploy/nginx/self-os.conf`
-- `deploy/VPS_DEPLOY.md`
-
-Пошаговый деплой см. в `deploy/VPS_DEPLOY.md`.
-
-## Тесты
-
-```bash
-pytest
-```
-
-## Contributing
-
-1. Fork → feature branch → PR against `main`.
-2. Ensure `pytest` passes and `ruff check .` reports no errors.
-3. Add docstrings to every new public class and function.
-4. New features must include unit tests in `tests/`.
-5. Do not break existing tests.
-
-## Проверочный сценарий
-
-В CLI введите по очереди:
-
-1. `Хочу сделать свою личную ОС SELF-OS.`
-2. `Надо выделить вечер, чтобы набросать архитектуру.`
-3. `Я боюсь, что не вывезу такой большой проект.`
-
-После этого в БД появятся соответствующие записи `journal_entries`, а в графе — узлы `PROJECT`, `NOTE`, `TASK`, `BELIEF` и связи `OWNS_PROJECT`, `HAS_TASK`, `HOLDS_BELIEF`, `RELATES_TO`.
-
-Для Telegram-сценария сообщение вида `Привет, я хочу переехать` создаёт `PROJECT` с именем `переезд`.
+See [LICENSE](LICENSE).
 
