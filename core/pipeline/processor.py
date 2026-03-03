@@ -44,6 +44,7 @@ from core.tools.memory_tools import build_default_tools
 
 if TYPE_CHECKING:
     from core.analytics.calibrator import ThresholdCalibrator
+    from core.neuro.bridge import NeuroBridge
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,7 @@ class MessageProcessor:
         use_llm: bool | None = None,  # backward compat, ignored
         event_bus: EventBus | None = None,
         background_mode: bool = False,
+        neuro_bridge: "NeuroBridge | None" = None,
     ) -> None:
         self.graph_api = graph_api
         self.journal = journal
@@ -124,6 +126,7 @@ class MessageProcessor:
             graph_api=graph_api,
             mood_tracker=self.mood_tracker,
             parts_memory=self.parts_memory,
+            neuro_bridge=neuro_bridge,
         )
         self._act = ActStage(
             llm_client=effective_llm,
@@ -179,6 +182,10 @@ class MessageProcessor:
         )
 
         all_edges = [*ori.created_edges, *dec.created_edges]
+
+        # Inject NeuroCore brain state into graph context (if available)
+        if dec.brain_state:
+            ori.graph_context["brain_state"] = dec.brain_state
 
         # 3b. INSIGHT — detect cross-pattern insights from new + historical data
         insight_nodes = await self._insight_engine.run(

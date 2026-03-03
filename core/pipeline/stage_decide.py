@@ -1,12 +1,13 @@
 """OODA — DECIDE stage.
 
 Selects policy, links tasks to projects, detects part–value conflicts,
-updates mood tracker.
+updates mood tracker, and mirrors data into NeuroCore (when available).
 """
 
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 from core.defaults import DECIDE_LOW_VALENCE_THRESHOLD, DECIDE_PATTERN_SCORE_THRESHOLD
 from core.graph.api import GraphAPI
@@ -15,13 +16,16 @@ from core.mood.tracker import MoodTracker
 from core.parts.memory import PartsMemory
 from core.search.qdrant_storage import VectorSearchResult
 
+if TYPE_CHECKING:
+    from core.neuro.bridge import NeuroBridge
+
 logger = logging.getLogger(__name__)
 
 
 class DecideResult:
     __slots__ = (
         "policy", "mood_context", "parts_context",
-        "created_edges",
+        "created_edges", "brain_state",
     )
 
     def __init__(
@@ -30,11 +34,13 @@ class DecideResult:
         mood_context: dict,
         parts_context: list[dict],
         created_edges: list[Edge],
+        brain_state: dict | None = None,
     ) -> None:
         self.policy = policy
         self.mood_context = mood_context
         self.parts_context = parts_context
         self.created_edges = created_edges
+        self.brain_state = brain_state
 
 
 class DecideStage:
@@ -45,10 +51,12 @@ class DecideStage:
         graph_api: GraphAPI,
         mood_tracker: MoodTracker,
         parts_memory: PartsMemory,
+        neuro_bridge: "NeuroBridge | None" = None,
     ) -> None:
         self.graph_api = graph_api
         self.mood_tracker = mood_tracker
         self.parts_memory = parts_memory
+        self.neuro_bridge = neuro_bridge
 
     async def run(
         self,
@@ -133,9 +141,20 @@ class DecideStage:
         emotion_nodes = [n for n in created_nodes if n.type == "EMOTION"]
         mood_context = await self.mood_tracker.update(user_id, emotion_nodes)
 
+        # --- NeuroCore mirroring ---
+        brain_state_dict: dict | None = None
+        if self.neuro_bridge and created_nodes:
+            try:
+                all_edges = [*created_edges, *extra_edges]
+                state = await self.neuro_bridge.mirror(user_id, created_nodes, all_edges)
+                brain_state_dict = state.to_dict()
+            except Exception as exc:
+                logger.warning("NeuroCore mirror failed: %s", exc)
+
         return DecideResult(
             policy=policy,
             mood_context=mood_context,
             parts_context=parts_context,
             created_edges=extra_edges,
+            brain_state=brain_state_dict,
         )
