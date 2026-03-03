@@ -1,25 +1,39 @@
-# SELF-OS — Personal Cognitive Operating System
+# SELF-OS — Psychological AI Digital Twin
 
-**Stage 1: Knowledge Graph Core — Complete**
+> **Stage 3: Agentic Functions — Stable**
 
-SELF-OS is an AI-powered personal cognitive operating system that builds and maintains a semantic knowledge graph from natural conversations. It models identity, emotions, beliefs, needs, and behavioral patterns — enabling deep self-awareness and intelligent assistance.
+SELF-OS is a production-grade psychological AI assistant that builds a living
+"digital twin" of the user's inner world.  It continuously observes user
+messages, updates a neurobiological model of emotions and beliefs, runs
+Internal Family Systems (IFS) debates between internal Parts, and predicts
+near-term mood trajectories — all to provide deeply personalised, therapeutic
+dialogue.
 
-## Recent Updates (March 2026)
+---
 
-- Added **L2 AnalysisEngine** (`core/analytics/analysis_engine.py`) with strict schema validation, fallback safety path, and fusion/provenance outputs.
-- Implemented **true hybrid fusion** (semantic + statistical) with pair deduplication, merged evidence refs, and conflict-aware direction handling.
-- Added **async L2 scheduling** in `MessageProcessor` and dedicated SQLite persistence table `l2_analysis_artifacts`.
-- Enabled **LLM causal validation** in frontier analytics path (`CAUSAL_VALIDATE_WITH_LLM=true` by default).
-- Improved reliability with **LLM retry + JSON repair** before fallback.
-- Fixed extractor consistency: **SOMA keys are now deterministic and non-null** (regex + LLM parser paths).
-- Added integration/report tooling for 7-message full-system diagnostics:
-    - `scripts/run_7sms_full_report.py`
-    - `scripts/print_7sms_summary.py`
+## Recent Updates (March 2026 — Stage 3 Stabilization)
 
-Validation highlights:
-- `tests/test_analysis_engine.py`
-- `tests/test_processor_l2_scheduler.py`
-- `tests/test_simulation_dialogue.py`
+- **InnerCouncil** (`agents/ifs/`) — 2-round IFS debate with genuine Round 2
+  position adjustment (CriticAgent softens when Exile has high pain; ExileAgent
+  amplifies need for safety when Critic dominates; FirefighterAgent raises
+  urgency when Exile is activated).
+- **PredictiveEngine** (`core/prediction/`) — EWMA state forecasting with
+  `PsycheState` / `PsycheStateForecast` / `InterventionImpact` DTOs.  Uses
+  only public `GraphStorage` APIs — no private method access.
+- **Shared IFS signals** (`agents/ifs/signals.py`) — single `PART_SIGNALS` /
+  `EMOTION_SIGNALS` dict used by both InnerCouncil and AgentOrchestrator.
+- **AgentOrchestrator wired** — `MessageProcessor` now accepts an optional
+  `orchestrator` parameter; when present, runs agent chain after DECIDE and
+  merges results into graph context.
+- **Background brain_state** — `_process_background()` now injects NeuroCore
+  brain state into graph context when `neuro_bridge` is available.
+- **PsycheState ↔ BrainState** bidirectional conversion via
+  `PsycheState.from_brain_state()` / `PsycheState.to_brain_state()`.
+- **NeuroCore performance** — Hebbian strengthening reduced from O(n²) to O(1)
+  SQL round-trips; `propagate()` rewritten to iterative BFS; `decay_cycle()`
+  skips already-dormant neurons; new `cleanup_dormant()` method.
+- **`intervention_outcomes`** DDL and public `get_avg_intervention_delta()`
+  method added to `GraphStorage`.
 
 ---
 

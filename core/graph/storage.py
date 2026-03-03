@@ -178,6 +178,53 @@ class GraphStorage(NodeOpsMixin, EdgeOpsMixin, MoodOpsMixin, SchedulerOpsMixin):
             await conn.commit()
             self._initialized = True
 
+    # ── Intervention outcomes ───────────────────────────────────────
+
+    async def get_avg_intervention_delta(
+        self,
+        user_id: str,
+        intervention_type: str,
+    ) -> dict[str, float] | None:
+        """Return average pre→post mood deltas for *intervention_type*.
+
+        Queries the ``intervention_outcomes`` table and returns a dict with
+        keys ``delta_valence``, ``delta_arousal``, ``delta_dominance``, and
+        ``sample_count``.  Returns ``None`` if no matching rows are found.
+
+        Parameters
+        ----------
+        user_id:
+            The user whose outcomes to aggregate.
+        intervention_type:
+            The intervention type string (e.g. ``"CBT"``, ``"IFS"``).
+        """
+        await self._ensure_initialized()
+        conn = await self._get_conn()
+        cursor = await conn.execute(
+            """
+            SELECT
+                AVG(post_valence  - pre_valence)  AS delta_valence,
+                AVG(post_arousal  - pre_arousal)  AS delta_arousal,
+                AVG(post_dominance - pre_dominance) AS delta_dominance,
+                COUNT(*) AS sample_count
+            FROM intervention_outcomes
+            WHERE user_id = ?
+              AND intervention_type = ?
+              AND pre_valence  IS NOT NULL
+              AND post_valence IS NOT NULL
+            """,
+            (user_id, intervention_type),
+        )
+        row = await cursor.fetchone()
+        if row is None or row["sample_count"] == 0:
+            return None
+        return {
+            "delta_valence": float(row["delta_valence"] or 0.0),
+            "delta_arousal": float(row["delta_arousal"] or 0.0),
+            "delta_dominance": float(row["delta_dominance"] or 0.0),
+            "sample_count": int(row["sample_count"]),
+        }
+
     # ── Search ─────────────────────────────────────────────────────
 
     async def hybrid_search(
