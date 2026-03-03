@@ -544,21 +544,38 @@ class OutcomeTracker:
 
 ---
 
-### Stage 3 — Society of Mind (4–6 месяцев)
+### Stage 3 — Society of Mind + Agentic Functions (4–6 месяцев)
 
-**Цель:** Внутренний диалог IFS-частей до формирования ответа.
+**Цель:** Внутренний диалог IFS-частей до формирования ответа + агентические функции.
 
-**Что создать:**
+**Статус Stage 3 (Март 2026):**
 
-| Интерфейс / Модуль | Действие |
-|---|---|
-| `agents/ifs/` | **Создать** директорию с `CriticAgent`, `FirefighterAgent`, `ExileAgent`, `SelfAgent` |
-| `agents/ifs/council.py` | **Создать** `InnerCouncil` с методом `deliberate()` |
-| `agents/orchestrator.py` | **Переписать** `AgentOrchestrator.run()` — добавить `InnerCouncil` для конфликтных сессий |
-| `core/pipeline/processor.py` | **Рефакторинг** `MessageProcessor` — вынести extraction в `ExtractionCoordinator` |
-| `core/llm/prompts.py` | **Добавить** voice-промпты для каждой IFS-части |
+#### Реализовано
 
-**Что убить:** `_INTENT_CHAINS` статические словари → заменить динамической маршрутизацией.
+| Интерфейс / Модуль | Статус | Описание |
+|---|---|---|
+| `agents/ifs/` | ✅ Done | `CriticAgent`, `FirefighterAgent`, `ExileAgent`, `SelfAgent` |
+| `agents/ifs/council.py` | ✅ Done | `InnerCouncil` с 2-round IFS debate |
+| `core/pipeline/orchestrator.py` | ✅ Done | Dynamic routing, IFS интеграция |
+| `core/llm/prompts.py` | ✅ Done | `IFS_VOICE_PROMPTS` для всех частей |
+| `core/psyche/state.py` | ✅ Done | `PsycheState`, `PsycheStateBuilder`, `PsycheStateStore` |
+| `core/goals/engine.py` | ✅ Done | `Goal`, `GoalEngine`, `GoalStore` (SQLite `goals` table) |
+| `core/tools/task_tool.py` | ✅ Done | `TaskTool`, `TaskStore` (SQLite `agent_tasks` table) |
+| `core/tools/web_search_tool.py` | ✅ Done | `WebSearchTool` stub + full interface |
+| `core/tools/obsidian_tool.py` | ✅ Done | `ObsidianTool` stub + full vault interface |
+| `core/tools/proactive_tool.py` | ✅ Done | `ProactiveTool` — heuristic + LLM suggestions |
+| `scripts/migrate_stage3.py` | ✅ Done | Safe idempotent schema migration script |
+| Schema: `mood_snapshots` | ✅ Done | `stressor_tags`, `active_parts_keys`, `intervention_applied`, `feedback_score` |
+| Schema: `journal_entries` | ✅ Done | `session_id`, `cognitive_load` |
+| Schema: `psyche_states` | ✅ Done | Time-series snapshots table |
+| Tests (90 new) | ✅ Done | Full coverage for all Stage 3 modules |
+
+#### In Progress / Remaining
+
+| Интерфейс / Модуль | Статус | Описание |
+|---|---|---|
+| `core/tools/web_search_tool.py` | 🔧 Stub | Требует API key (SerpAPI / Brave / Tavily) |
+| `core/tools/obsidian_tool.py` | 🔧 Stub | Требует `OBSIDIAN_VAULT_PATH` + `GraphAPI` инъекция в `sync_graph_to_vault` |
 
 **KPI:** На сессиях с `session_conflict=True` ответы должны упоминать конкретные части и их потребности ≥80% времени.
 
