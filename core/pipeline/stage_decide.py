@@ -145,8 +145,8 @@ class DecideStage:
         brain_state_dict: dict | None = None
         if self.neuro_bridge and created_nodes:
             try:
-                all_edges = [*created_edges, *extra_edges]
-                state = await self.neuro_bridge.mirror(user_id, created_nodes, all_edges)
+                mirror_edges = [*created_edges, *extra_edges]
+                state = await self.neuro_bridge.mirror(user_id, created_nodes, mirror_edges)
                 brain_state_dict = state.to_dict()
             except Exception as exc:
                 logger.warning("NeuroCore mirror failed: %s", exc)

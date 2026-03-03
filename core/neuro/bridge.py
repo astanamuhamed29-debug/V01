@@ -97,9 +97,12 @@ class NeuroBridge:
         # Carry over the original graph node id for traceability
         meta["graph_node_id"] = node.id
 
-        valence = float(meta.pop("pad_v", meta.pop("valence", 0.0)))
-        arousal = float(meta.pop("pad_a", meta.pop("arousal", 0.0)))
-        dominance = float(meta.pop("pad_d", meta.pop("dominance", 0.5)))
+        valence = float(meta.pop("pad_v", meta.get("valence", 0.0)))
+        meta.pop("valence", None)
+        arousal = float(meta.pop("pad_a", meta.get("arousal", 0.0)))
+        meta.pop("arousal", None)
+        dominance = float(meta.pop("pad_d", meta.get("dominance", 0.5)))
+        meta.pop("dominance", None)
 
         try:
             neuron = await self._nc.activate(
