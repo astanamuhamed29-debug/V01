@@ -21,7 +21,7 @@ class Neuron:
     """Unified data unit inspired by biological neurons.
 
     Every piece of information in the system is a Neuron with
-    activation dynamics, emotional valence, and decay behaviour.
+    activation dynamics, emotional valence, and decay behavior.
     """
 
     id: str
