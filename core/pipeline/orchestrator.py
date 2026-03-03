@@ -8,13 +8,21 @@ routed to a specialised agent. Each agent exposes a single async interface::
 The :class:`AgentOrchestrator` selects the right chain of agents based on
 intent and graph/mood/parts context, with a fallback strategy when any
 single agent fails.
+
+Stage 3 extension: when ``InnerCouncil.should_activate`` returns *True*
+(conflict session or 2+ active parts), the orchestrator delegates to
+:class:`InnerCouncil` for a multi-round IFS-parts debate before the
+standard agent chain.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from agents.ifs.council import InnerCouncil
 
 logger = logging.getLogger(__name__)
 
@@ -223,14 +231,35 @@ _DEFAULT_CHAIN: list[str] = ["semantic_extractor", "emotion_analysis", "insight_
 class AgentOrchestrator:
     """Routes messages through a conditional chain of specialised agents.
 
+    When :meth:`InnerCouncil.should_activate` is *True* the orchestrator
+    runs an IFS debate before the standard agent chain and injects the
+    verdict into the merged result metadata.
+
     Usage::
 
         orchestrator = AgentOrchestrator()
         result = await orchestrator.run(context)
     """
 
-    def __init__(self, agents: dict[str, BaseAgent] | None = None) -> None:
-        self._agents: dict[str, BaseAgent] = agents if agents is not None else dict(_AGENTS)
+    def __init__(
+        self,
+        agents: dict[str, BaseAgent] | None = None,
+        inner_council: InnerCouncil | None = None,
+    ) -> None:
+        self._agents: dict[str, BaseAgent] = (
+            agents if agents is not None else dict(_AGENTS)
+        )
+        # Lazy import to avoid circular dependency at module level
+        if inner_council is not None:
+            self._council: InnerCouncil | None = inner_council
+        else:
+            try:
+                from agents.ifs.council import (
+                    InnerCouncil as _IC,
+                )
+                self._council = _IC()
+            except Exception:
+                self._council = None
 
     def _get_chain(self, intent: str) -> list[str]:
         """Return the agent chain names for *intent*."""
@@ -244,6 +273,38 @@ class AgentOrchestrator:
         """
         chain = self._get_chain(context.intent)
         merged = AgentResult()
+
+        # --- Stage 3: InnerCouncil debate for conflict sessions ---
+        if self._council is not None:
+            try:
+                from agents.ifs.council import (
+                    InnerCouncil as _IC,
+                )
+                if _IC.should_activate(
+                    context.graph_context, context.parts_context,
+                ):
+                    verdict = await self._council.deliberate(context)
+                    merged.metadata["council_verdict"] = {
+                        "dominant_part": verdict.dominant_part,
+                        "consensus_reply": verdict.consensus_reply,
+                        "unresolved_conflict": (
+                            verdict.unresolved_conflict
+                        ),
+                        "debate_entries": len(verdict.internal_log),
+                    }
+                    if verdict.consensus_reply:
+                        merged.reply_fragment = verdict.consensus_reply
+                    logger.info(
+                        "InnerCouncil verdict: dominant=%s "
+                        "unresolved=%s entries=%d",
+                        verdict.dominant_part,
+                        verdict.unresolved_conflict,
+                        len(verdict.internal_log),
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "InnerCouncil failed: %s — continuing", exc,
+                )
 
         current_context = context
         for agent_name in chain:
