@@ -177,7 +177,7 @@ def _build_rationale(state: PsycheState, modality: str) -> str:
         reasons.append(f"высокое возбуждение ({state.arousal:.2f})")
 
     if state.valence <= _LOW_VALENCE:
-        reasons.append(f"низкий валентность ({state.valence:.2f})")
+        reasons.append(f"низкая валентность ({state.valence:.2f})")
 
     if state.distortion_count >= _DISTORTION_THRESHOLD:
         reasons.append(f"когнитивных искажений: {state.distortion_count}")
