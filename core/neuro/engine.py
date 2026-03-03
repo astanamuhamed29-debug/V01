@@ -525,12 +525,8 @@ class NeuroCore:
         await self._ensure_initialized()
         assert self._conn is not None
 
-        cutoff = (
-            datetime.now(timezone.utc)
-            .replace(microsecond=0)
-            .isoformat()
-        )
         # Use a simple date arithmetic via SQLite strftime
+        cutoff_modifier = f"-{max_age_days} days"
         async with self._lock:
             cursor = await self._conn.execute(
                 """UPDATE neurons
@@ -540,9 +536,9 @@ class NeuroCore:
                      AND activation < ?
                      AND (
                          last_activated IS NULL
-                         OR datetime(last_activated) < datetime(?, ?, ?)
+                         OR datetime(last_activated) < datetime('now', ?)
                      )""",
-                (user_id, ACTIVATION_THRESHOLD, cutoff, "-", f"{max_age_days} days"),
+                (user_id, ACTIVATION_THRESHOLD, cutoff_modifier),
             )
             await self._conn.commit()
             return cursor.rowcount

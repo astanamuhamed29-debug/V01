@@ -10,7 +10,7 @@ This document describes the internal architecture of SELF-OS: how messages flow 
 
 1. [System Overview](#1-system-overview)
 2. [OODA Pipeline](#2-ooda-pipeline)
-3. [InnerCouncil (IFS Debate)](#3-innercounil-ifs-debate)
+3. [InnerCouncil (IFS Debate)](#3-innercouncil-ifs-debate)
 4. [NeuroCore](#4-neurocore)
 5. [PredictiveEngine](#5-predictiveengine)
 6. [DTO Reference](#6-dto-reference)

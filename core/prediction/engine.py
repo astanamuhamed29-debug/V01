@@ -174,7 +174,7 @@ class PredictiveEngine:
             stressor_tags = []
 
         # Extract cognitive_load — may be stored directly in the snapshot
-        cognitive_load = float(snapshot.get("cognitive_load", 0.0) or 0.0)
+        cognitive_load = float(snapshot.get("cognitive_load") or 0.0)
 
         # Extract dominant_need from active_needs JSON or explicit key
         dominant_need: str | None = snapshot.get("dominant_need")
