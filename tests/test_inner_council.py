@@ -257,3 +257,81 @@ def test_orchestrator_no_council_when_not_needed():
     ctx = _ctx("Привет", intent="UNKNOWN")
     result = asyncio.run(orch.run(ctx))
     assert "council_verdict" not in result.metadata
+
+
+# ---------------------------------------------------------------------------
+# Stage 3: Dynamic routing
+# ---------------------------------------------------------------------------
+
+
+def test_dynamic_routing_injects_parts_detector():
+    """When parts_context is present, parts_detector is added to chain."""
+    orch = AgentOrchestrator()
+    chain = orch._get_chain(
+        "EVENT_REPORT",
+        _ctx(
+            "text",
+            intent="EVENT_REPORT",
+            parts_context=[{"name": "Critic"}],
+        ),
+    )
+    assert "parts_detector" in chain
+
+
+def test_dynamic_routing_injects_conflict_resolver():
+    """When session_conflict is set, conflict_resolver is added."""
+    orch = AgentOrchestrator()
+    chain = orch._get_chain(
+        "EVENT_REPORT",
+        _ctx(
+            "text",
+            intent="EVENT_REPORT",
+            graph_context={"session_conflict": True},
+        ),
+    )
+    assert "conflict_resolver" in chain
+
+
+def test_dynamic_routing_no_duplicate():
+    """If parts_detector already in chain, don't duplicate."""
+    orch = AgentOrchestrator()
+    chain = orch._get_chain(
+        "FEELING_REPORT",
+        _ctx(
+            "text",
+            intent="FEELING_REPORT",
+            parts_context=[{"name": "X"}],
+        ),
+    )
+    assert chain.count("parts_detector") == 1
+
+
+def test_dynamic_routing_without_context():
+    """Without context, fall back to static chain."""
+    orch = AgentOrchestrator()
+    chain = orch._get_chain("FEELING_REPORT")
+    assert "parts_detector" in chain  # FEELING_REPORT always has it
+
+
+# ---------------------------------------------------------------------------
+# Stage 3: IFS Voice Prompts
+# ---------------------------------------------------------------------------
+
+
+def test_ifs_voice_prompts_exist():
+    from core.llm.prompts import IFS_VOICE_PROMPTS
+
+    assert "MANAGER" in IFS_VOICE_PROMPTS
+    assert "FIREFIGHTER" in IFS_VOICE_PROMPTS
+    assert "EXILE" in IFS_VOICE_PROMPTS
+    assert "SELF" in IFS_VOICE_PROMPTS
+
+
+def test_ifs_voice_prompts_match_agents():
+    """Voice prompts in prompts.py should match agent voice_prompt attrs."""
+    from core.llm.prompts import IFS_VOICE_PROMPTS
+
+    for agent_cls in [CriticAgent, FirefighterAgent, ExileAgent, SelfAgent]:
+        agent = agent_cls()
+        assert agent.part_type in IFS_VOICE_PROMPTS
+        assert IFS_VOICE_PROMPTS[agent.part_type] == agent.voice_prompt

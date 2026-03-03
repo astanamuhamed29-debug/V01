@@ -210,17 +210,32 @@ _AGENTS: dict[str, BaseAgent] = {
     ]
 }
 
-# Intent → preferred agent chain
+# Intent → preferred agent chain (Stage 3: used as fallback when dynamic
+# routing is not applicable).
 _INTENT_CHAINS: dict[str, list[str]] = {
-    "FEELING_REPORT": ["emotion_analysis", "parts_detector", "conflict_resolver", "insight_generator"],
-    "EVENT_REPORT": ["semantic_extractor", "emotion_analysis", "insight_generator"],
-    "META": ["semantic_extractor", "conflict_resolver", "insight_generator"],
+    "FEELING_REPORT": [
+        "emotion_analysis", "parts_detector",
+        "conflict_resolver", "insight_generator",
+    ],
+    "EVENT_REPORT": [
+        "semantic_extractor", "emotion_analysis",
+        "insight_generator",
+    ],
+    "META": [
+        "semantic_extractor", "conflict_resolver",
+        "insight_generator",
+    ],
     "TASK_REPORT": ["semantic_extractor", "insight_generator"],
-    "REFLECTION": ["emotion_analysis", "parts_detector", "insight_generator"],
+    "REFLECTION": [
+        "emotion_analysis", "parts_detector",
+        "insight_generator",
+    ],
     "UNKNOWN": ["semantic_extractor", "emotion_analysis"],
 }
 
-_DEFAULT_CHAIN: list[str] = ["semantic_extractor", "emotion_analysis", "insight_generator"]
+_DEFAULT_CHAIN: list[str] = [
+    "semantic_extractor", "emotion_analysis", "insight_generator",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -261,9 +276,46 @@ class AgentOrchestrator:
             except Exception:
                 self._council = None
 
-    def _get_chain(self, intent: str) -> list[str]:
-        """Return the agent chain names for *intent*."""
-        return _INTENT_CHAINS.get(intent, _DEFAULT_CHAIN)
+    def _get_chain(
+        self,
+        intent: str,
+        context: AgentContext | None = None,
+    ) -> list[str]:
+        """Build the agent chain for *intent*, optionally enriched by context.
+
+        Stage 3 dynamic routing: when parts or conflicts are present in
+        *context*, ``parts_detector`` and ``conflict_resolver`` are injected
+        into the chain even for intents that normally skip them.
+        """
+        base = list(_INTENT_CHAINS.get(intent, _DEFAULT_CHAIN))
+
+        if context is None:
+            return base
+
+        # Dynamic enrichment — inject agents based on context signals
+        has_parts = bool(context.parts_context)
+        has_conflict = context.graph_context.get(
+            "session_conflict", False,
+        )
+
+        if has_parts and "parts_detector" not in base:
+            # Insert before insight_generator if present
+            idx = (
+                base.index("insight_generator")
+                if "insight_generator" in base
+                else len(base)
+            )
+            base.insert(idx, "parts_detector")
+
+        if has_conflict and "conflict_resolver" not in base:
+            idx = (
+                base.index("insight_generator")
+                if "insight_generator" in base
+                else len(base)
+            )
+            base.insert(idx, "conflict_resolver")
+
+        return base
 
     async def run(self, context: AgentContext) -> AgentResult:
         """Execute the agent chain for *context.intent* and merge results.
@@ -271,7 +323,7 @@ class AgentOrchestrator:
         Falls back to the next agent in the chain if any single agent raises
         an exception.
         """
-        chain = self._get_chain(context.intent)
+        chain = self._get_chain(context.intent, context)
         merged = AgentResult()
 
         # --- Stage 3: InnerCouncil debate for conflict sessions ---
