@@ -8,13 +8,21 @@ routed to a specialised agent. Each agent exposes a single async interface::
 The :class:`AgentOrchestrator` selects the right chain of agents based on
 intent and graph/mood/parts context, with a fallback strategy when any
 single agent fails.
+
+Stage 3 extension: when ``InnerCouncil.should_activate`` returns *True*
+(conflict session or 2+ active parts), the orchestrator delegates to
+:class:`InnerCouncil` for a multi-round IFS-parts debate before the
+standard agent chain.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from agents.ifs.council import InnerCouncil
 
 logger = logging.getLogger(__name__)
 
@@ -202,17 +210,32 @@ _AGENTS: dict[str, BaseAgent] = {
     ]
 }
 
-# Intent → preferred agent chain
+# Intent → preferred agent chain (Stage 3: used as fallback when dynamic
+# routing is not applicable).
 _INTENT_CHAINS: dict[str, list[str]] = {
-    "FEELING_REPORT": ["emotion_analysis", "parts_detector", "conflict_resolver", "insight_generator"],
-    "EVENT_REPORT": ["semantic_extractor", "emotion_analysis", "insight_generator"],
-    "META": ["semantic_extractor", "conflict_resolver", "insight_generator"],
+    "FEELING_REPORT": [
+        "emotion_analysis", "parts_detector",
+        "conflict_resolver", "insight_generator",
+    ],
+    "EVENT_REPORT": [
+        "semantic_extractor", "emotion_analysis",
+        "insight_generator",
+    ],
+    "META": [
+        "semantic_extractor", "conflict_resolver",
+        "insight_generator",
+    ],
     "TASK_REPORT": ["semantic_extractor", "insight_generator"],
-    "REFLECTION": ["emotion_analysis", "parts_detector", "insight_generator"],
+    "REFLECTION": [
+        "emotion_analysis", "parts_detector",
+        "insight_generator",
+    ],
     "UNKNOWN": ["semantic_extractor", "emotion_analysis"],
 }
 
-_DEFAULT_CHAIN: list[str] = ["semantic_extractor", "emotion_analysis", "insight_generator"]
+_DEFAULT_CHAIN: list[str] = [
+    "semantic_extractor", "emotion_analysis", "insight_generator",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -223,18 +246,76 @@ _DEFAULT_CHAIN: list[str] = ["semantic_extractor", "emotion_analysis", "insight_
 class AgentOrchestrator:
     """Routes messages through a conditional chain of specialised agents.
 
+    When :meth:`InnerCouncil.should_activate` is *True* the orchestrator
+    runs an IFS debate before the standard agent chain and injects the
+    verdict into the merged result metadata.
+
     Usage::
 
         orchestrator = AgentOrchestrator()
         result = await orchestrator.run(context)
     """
 
-    def __init__(self, agents: dict[str, BaseAgent] | None = None) -> None:
-        self._agents: dict[str, BaseAgent] = agents if agents is not None else dict(_AGENTS)
+    def __init__(
+        self,
+        agents: dict[str, BaseAgent] | None = None,
+        inner_council: InnerCouncil | None = None,
+    ) -> None:
+        self._agents: dict[str, BaseAgent] = (
+            agents if agents is not None else dict(_AGENTS)
+        )
+        # Lazy import to avoid circular dependency at module level
+        if inner_council is not None:
+            self._council: InnerCouncil | None = inner_council
+        else:
+            try:
+                from agents.ifs.council import (
+                    InnerCouncil as _IC,
+                )
+                self._council = _IC()
+            except Exception:
+                self._council = None
 
-    def _get_chain(self, intent: str) -> list[str]:
-        """Return the agent chain names for *intent*."""
-        return _INTENT_CHAINS.get(intent, _DEFAULT_CHAIN)
+    def _get_chain(
+        self,
+        intent: str,
+        context: AgentContext | None = None,
+    ) -> list[str]:
+        """Build the agent chain for *intent*, optionally enriched by context.
+
+        Stage 3 dynamic routing: when parts or conflicts are present in
+        *context*, ``parts_detector`` and ``conflict_resolver`` are injected
+        into the chain even for intents that normally skip them.
+        """
+        base = list(_INTENT_CHAINS.get(intent, _DEFAULT_CHAIN))
+
+        if context is None:
+            return base
+
+        # Dynamic enrichment — inject agents based on context signals
+        has_parts = bool(context.parts_context)
+        has_conflict = context.graph_context.get(
+            "session_conflict", False,
+        )
+
+        if has_parts and "parts_detector" not in base:
+            # Insert before insight_generator if present
+            idx = (
+                base.index("insight_generator")
+                if "insight_generator" in base
+                else len(base)
+            )
+            base.insert(idx, "parts_detector")
+
+        if has_conflict and "conflict_resolver" not in base:
+            idx = (
+                base.index("insight_generator")
+                if "insight_generator" in base
+                else len(base)
+            )
+            base.insert(idx, "conflict_resolver")
+
+        return base
 
     async def run(self, context: AgentContext) -> AgentResult:
         """Execute the agent chain for *context.intent* and merge results.
@@ -242,8 +323,40 @@ class AgentOrchestrator:
         Falls back to the next agent in the chain if any single agent raises
         an exception.
         """
-        chain = self._get_chain(context.intent)
+        chain = self._get_chain(context.intent, context)
         merged = AgentResult()
+
+        # --- Stage 3: InnerCouncil debate for conflict sessions ---
+        if self._council is not None:
+            try:
+                from agents.ifs.council import (
+                    InnerCouncil as _IC,
+                )
+                if _IC.should_activate(
+                    context.graph_context, context.parts_context,
+                ):
+                    verdict = await self._council.deliberate(context)
+                    merged.metadata["council_verdict"] = {
+                        "dominant_part": verdict.dominant_part,
+                        "consensus_reply": verdict.consensus_reply,
+                        "unresolved_conflict": (
+                            verdict.unresolved_conflict
+                        ),
+                        "debate_entries": len(verdict.internal_log),
+                    }
+                    if verdict.consensus_reply:
+                        merged.reply_fragment = verdict.consensus_reply
+                    logger.info(
+                        "InnerCouncil verdict: dominant=%s "
+                        "unresolved=%s entries=%d",
+                        verdict.dominant_part,
+                        verdict.unresolved_conflict,
+                        len(verdict.internal_log),
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "InnerCouncil failed: %s — continuing", exc,
+                )
 
         current_context = context
         for agent_name in chain:
