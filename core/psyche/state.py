@@ -104,6 +104,47 @@ class PsycheState:
             confidence=float(data.get("confidence", 1.0)),
         )
 
+    # ── Bidirectional conversion with BrainState ──────────────────────────
+
+    @classmethod
+    def from_brain_state(cls, brain_state: Any) -> "PsycheState":
+        """Create a :class:`PsycheState` from a :class:`~core.neuro.schema.BrainState`.
+
+        Mapping:
+            ``emotional_valence`` → ``valence``
+            ``emotional_arousal``  → ``arousal``
+            ``active_parts``       → ``active_parts`` (list of part keys)
+            ``active_needs``       → ``stressor_tags``
+            ``cognitive_load``     → ``cognitive_load``
+        """
+        from datetime import UTC, datetime
+
+        now = datetime.now(UTC).isoformat()
+        return cls(
+            timestamp=getattr(brain_state, "timestamp", now) or now,
+            user_id=brain_state.user_id,
+            valence=brain_state.emotional_valence,
+            arousal=brain_state.emotional_arousal,
+            active_parts=list(brain_state.active_parts),
+            stressor_tags=list(brain_state.active_needs),
+            cognitive_load=brain_state.cognitive_load,
+            dominant_need=brain_state.active_needs[0] if brain_state.active_needs else None,
+        )
+
+    def to_brain_state(self) -> Any:
+        """Convert this state back to a :class:`~core.neuro.schema.BrainState`."""
+        from core.neuro.schema import BrainState
+
+        return BrainState(
+            user_id=self.user_id,
+            timestamp=self.timestamp,
+            emotional_valence=self.valence,
+            emotional_arousal=self.arousal,
+            active_parts=list(self.active_parts),
+            active_needs=list(self.stressor_tags),
+            cognitive_load=self.cognitive_load,
+        )
+
 
 class PsycheStateBuilder:
     """Assembles a :class:`PsycheState` from existing SELF-OS subsystems.

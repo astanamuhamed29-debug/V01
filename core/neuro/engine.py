@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from collections import deque
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
@@ -364,12 +365,14 @@ class NeuroCore:
         neuron_id: str,
         depth: int = 2,
     ) -> list[Neuron]:
-        """Spreading activation from *neuron_id*.
+        """Spreading activation from *neuron_id* using iterative BFS.
 
         Activation spreads along outgoing synapses with magnitude
         ``source.activation * synapse.weight * SPREADING_FACTOR``,
-        recursively up to *depth* hops.  Returns all neurons whose
-        activation was boosted above ``ACTIVATION_THRESHOLD``.
+        up to *depth* hops.  Uses an iterative BFS with
+        :class:`collections.deque` instead of recursion to avoid deep call
+        stacks.  Returns all neurons whose activation was boosted above
+        ``ACTIVATION_THRESHOLD``.
         """
         await self._ensure_initialized()
         assert self._conn is not None
@@ -377,9 +380,15 @@ class NeuroCore:
         visited: set[str] = set()
         activated: list[Neuron] = []
 
-        async def _spread(nid: str, incoming_activation: float, level: int) -> None:
+        # BFS queue: (neuron_id, incoming_activation, current_level)
+        queue: deque[tuple[str, float, int]] = deque()
+        queue.append((neuron_id, 0.0, 0))
+
+        while queue:
+            nid, incoming_activation, level = queue.popleft()
+
             if level > depth or nid in visited:
-                return
+                continue
             visited.add(nid)
 
             # Boost target neuron
@@ -398,22 +407,18 @@ class NeuroCore:
             if neuron and neuron.activation >= ACTIVATION_THRESHOLD:
                 activated.append(neuron)
 
-                # Find outgoing synapses
-                cursor = await self._conn.execute(
-                    """SELECT target_neuron_id, weight FROM synapses
-                       WHERE user_id = ? AND source_neuron_id = ?""",
-                    (user_id, nid),
-                )
-                rows = await cursor.fetchall()
-                for row in rows:
-                    spread = neuron.activation * row["weight"] * SPREADING_FACTOR
-                    if spread >= ACTIVATION_THRESHOLD:
-                        await _spread(row["target_neuron_id"], spread, level + 1)
-
-        # Start propagation from source neuron
-        source = await self.get_neuron(neuron_id)
-        if source:
-            await _spread(neuron_id, 0, 0)  # level 0 = source itself
+                if level < depth:
+                    # Find outgoing synapses and enqueue neighbours
+                    cursor = await self._conn.execute(
+                        """SELECT target_neuron_id, weight FROM synapses
+                           WHERE user_id = ? AND source_neuron_id = ?""",
+                        (user_id, nid),
+                    )
+                    rows = await cursor.fetchall()
+                    for row in rows:
+                        spread = neuron.activation * row["weight"] * SPREADING_FACTOR
+                        if spread >= ACTIVATION_THRESHOLD:
+                            queue.append((row["target_neuron_id"], spread, level + 1))
 
         return activated
 
@@ -435,7 +440,7 @@ class NeuroCore:
             await self._conn.execute(
                 """UPDATE neurons
                    SET activation = MAX(activation * (1.0 - decay_rate), 0.0)
-                 WHERE user_id = ? AND is_deleted = 0""",
+                 WHERE user_id = ? AND is_deleted = 0 AND activation > 0""",
                 (user_id,),
             )
             await self._conn.commit()
@@ -460,9 +465,9 @@ class NeuroCore:
     ) -> int:
         """Strengthen synapses between co-activated neurons.
 
-        For every pair ``(a, b)`` where a synapse exists, its weight
-        is increased by ``HEBBIAN_INCREMENT``.  Returns the number of
-        synapses strengthened.
+        Uses a single ``SELECT ... WHERE source_neuron_id IN (...)`` query to
+        fetch all relevant synapses in O(1) SQL round-trips, then batches the
+        ``UPDATE`` statements.  Returns the number of synapses strengthened.
         """
         await self._ensure_initialized()
         assert self._conn is not None
@@ -471,30 +476,71 @@ class NeuroCore:
             return 0
 
         now = datetime.now(timezone.utc).isoformat()
-        strengthened = 0
         id_set = set(neuron_ids)
+        placeholders = ",".join("?" * len(id_set))
+        id_list = list(id_set)
 
         async with self._lock:
-            for nid in id_set:
-                cursor = await self._conn.execute(
-                    """SELECT id, target_neuron_id, weight FROM synapses
-                       WHERE user_id = ? AND source_neuron_id = ?""",
-                    (user_id, nid),
+            cursor = await self._conn.execute(
+                f"""SELECT id, source_neuron_id, target_neuron_id, weight
+                    FROM synapses
+                    WHERE user_id = ?
+                      AND source_neuron_id IN ({placeholders})
+                      AND target_neuron_id IN ({placeholders})""",
+                [user_id, *id_list, *id_list],
+            )
+            rows = await cursor.fetchall()
+
+            strengthened = 0
+            for row in rows:
+                new_w = min(MAX_ACTIVATION, row["weight"] + HEBBIAN_INCREMENT)
+                await self._conn.execute(
+                    """UPDATE synapses
+                       SET weight = ?, last_activated = ?
+                     WHERE id = ?""",
+                    (new_w, now, row["id"]),
                 )
-                rows = await cursor.fetchall()
-                for row in rows:
-                    if row["target_neuron_id"] in id_set:
-                        new_w = min(MAX_ACTIVATION, row["weight"] + HEBBIAN_INCREMENT)
-                        await self._conn.execute(
-                            """UPDATE synapses
-                               SET weight = ?, last_activated = ?
-                             WHERE id = ?""",
-                            (new_w, now, row["id"]),
-                        )
-                        strengthened += 1
+                strengthened += 1
             await self._conn.commit()
 
         return strengthened
+
+    # ----------------------------------------------------------
+    # Dormant neuron garbage collection
+    # ----------------------------------------------------------
+
+    async def cleanup_dormant(
+        self,
+        user_id: str,
+        max_age_days: int = 90,
+    ) -> int:
+        """Soft-delete neurons that are dormant and old.
+
+        Sets ``is_deleted = 1`` for neurons belonging to *user_id* whose
+        activation is below ``ACTIVATION_THRESHOLD`` and that have not been
+        activated within the last *max_age_days* days.
+
+        Returns the count of neurons soft-deleted.
+        """
+        await self._ensure_initialized()
+        assert self._conn is not None
+
+        cutoff_modifier = f"-{max_age_days} days"
+        async with self._lock:
+            cursor = await self._conn.execute(
+                """UPDATE neurons
+                   SET is_deleted = 1
+                   WHERE user_id = ?
+                     AND is_deleted = 0
+                     AND activation < ?
+                     AND (
+                         last_activated IS NULL
+                         OR datetime(last_activated) < datetime('now', ?)
+                     )""",
+                (user_id, ACTIVATION_THRESHOLD, cutoff_modifier),
+            )
+            await self._conn.commit()
+            return cursor.rowcount
 
     # ----------------------------------------------------------
     # Brain state

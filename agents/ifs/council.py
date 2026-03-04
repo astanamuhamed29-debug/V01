@@ -111,16 +111,34 @@ class InnerCouncil:
             except Exception as exc:
                 logger.warning("InnerCouncil: agent %r failed — %s", role, exc)
 
+        # ---- Round 2: re-run with council awareness -------------------------
+        # Each agent gets to see what others said in Round 1 and may adjust.
+        round2_voices: list[IFSAgentResult] = []
+        for role, agent in self._agents.items():
+            try:
+                result = await agent.respond(context, council_voices=voices)
+                round2_voices.append(result)
+                logger.debug("InnerCouncil round-2 — %s: %r", role, result.voice[:60])
+            except TypeError:
+                # Agent doesn't support council_voices yet — fall back to Round 1 result
+                round1 = next((v for v in voices if v.part_role == role), None)
+                if round1:
+                    round2_voices.append(round1)
+            except Exception as exc:
+                logger.warning("InnerCouncil round-2: agent %r failed — %s", role, exc)
+
+        final_voices = round2_voices if round2_voices else voices
+
         # ---- Determine dominant need ---------------------------------------
         need_counts: dict[str, int] = {}
-        for v in voices:
+        for v in final_voices:
             if v.need:
                 need_counts[v.need] = need_counts.get(v.need, 0) + 1
         dominant_need = max(need_counts, key=lambda k: need_counts[k]) if need_counts else ""
 
-        # ---- Inject round-1 voices into Self's context --------------------
+        # ---- Inject round-2 voices into Self's context --------------------
         enriched_parts = list(context.parts_context)
-        for v in voices:
+        for v in final_voices:
             enriched_parts.append({"subtype": v.part_role, "voice": v.voice})
 
         self_ctx = IFSAgentContext(
@@ -132,15 +150,15 @@ class InnerCouncil:
             graph_context=context.graph_context,
         )
 
-        # ---- Round 2: Self synthesis ----------------------------------------
+        # ---- Self synthesis (Round 3 effectively) --------------------------
         self_result = await self._self_agent.respond(self_ctx)
-        logger.debug("InnerCouncil round-2 (Self): %r", self_result.voice[:80])
+        logger.debug("InnerCouncil self-synthesis: %r", self_result.voice[:80])
 
         # ---- Pick recommended modality ------------------------------------
-        modality = _pick_modality(voices, context)
+        modality = _pick_modality(final_voices, context)
 
         return CouncilResult(
-            voices=voices,
+            voices=final_voices,
             synthesis=self_result.voice,
             dominant_need=dominant_need,
             recommended_modality=modality,

@@ -16,6 +16,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from agents.ifs.signals import EMOTION_SIGNALS, PART_SIGNALS
+
 logger = logging.getLogger(__name__)
 
 
@@ -104,14 +106,7 @@ class EmotionAnalysisAgent(BaseAgent):
         nodes: list[dict[str, Any]] = []
         text_lower = context.text.lower()
 
-        emotion_keywords: dict[str, list[str]] = {
-            "тревога": ["тревог", "тревож", "беспокой", "волну", "страх"],
-            "радость": ["радост", "счастл", "рад ", "доволен"],
-            "грусть": ["грустн", "печал", "тоскл", "уныл"],
-            "злость": ["злост", "злюсь", "раздраж", "бешен"],
-        }
-
-        for label, keywords in emotion_keywords.items():
+        for label, keywords in EMOTION_SIGNALS.items():
             if any(kw in text_lower for kw in keywords):
                 nodes.append({"type": "EMOTION", "label": label, "source": "emotion_agent"})
 
@@ -128,13 +123,7 @@ class PartsDetectorAgent(BaseAgent):
         nodes: list[dict[str, Any]] = []
         text_lower = context.text.lower()
 
-        part_signals: dict[str, list[str]] = {
-            "MANAGER": ["контролирую", "слежу", "организую", "планирую"],
-            "FIREFIGHTER": ["отвлекаюсь", "убегаю", "спасаюсь", "игнорирую"],
-            "EXILE": ["боюсь", "стыжусь", "не могу", "одинок"],
-        }
-
-        for subtype, keywords in part_signals.items():
+        for subtype, keywords in PART_SIGNALS.items():
             if any(kw in text_lower for kw in keywords):
                 nodes.append({"type": "PART", "subtype": subtype, "source": "parts_agent"})
 
