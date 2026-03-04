@@ -240,8 +240,11 @@ V999/
 
 | Document | Description |
 |---|---|
+| [docs/VISION.md](docs/VISION.md) | Product vision: three pillars, user journey, and why now |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Technical roadmap: Stages 1–5, what's built and what's planned |
+| [docs/PRICING.md](docs/PRICING.md) | Pricing strategy, tiers, unit economics, and go-to-market |
+| [docs/COMPETITIVE.md](docs/COMPETITIVE.md) | Competitive landscape, matrix analysis, and differentiation |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Detailed system architecture and module interactions |
-| [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Complete configuration reference |
 | [docs/FRONTIER_VISION_REPORT.md](docs/FRONTIER_VISION_REPORT.md) | Vision roadmap: Stage 1 → Stage 5 |
 | [deploy/VPS_DEPLOY.md](deploy/VPS_DEPLOY.md) | Production VPS deployment guide |
 
