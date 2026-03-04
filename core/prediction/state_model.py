@@ -1,19 +1,20 @@
-"""PredictiveEngine data-transfer objects.
+"""PsycheState and related DTOs for Stage-4 PredictiveEngine.
 
-Defines :class:`PsycheState <core.prediction.state_model.PsycheState>` (the
-prediction-layer snapshot), :class:`PsycheStateForecast`, and
-:class:`InterventionImpact`.
+``PsycheState`` is the **single entry-point** that aggregates all subsystem
+signals (mood/PAD, IFS parts, NeuroCore brain-state, cognitive patterns, and
+goal metrics) into one dataclass.  Every downstream module — TherapyPlanner,
+InterventionSelector, PredictiveEngine — receives a ``PsycheState`` instead
+of accessing individual subsystems directly.
 
-Note: This ``PsycheState`` is the *prediction-layer* variant used inside
-``core/prediction/``.  The canonical user-facing snapshot lives in
-``core/psyche/state.py``.  Bidirectional conversion helpers are provided
-via :meth:`PsycheState.from_brain_state` and :meth:`PsycheState.to_brain_state`.
+This design satisfies the Stage-4 → Stage-5 requirement of having a unified
+state representation that can be serialised, forecasted, and eventually fed
+into an SSM / Mamba-based predictive model.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from core.neuro.schema import BrainState
@@ -21,165 +22,152 @@ if TYPE_CHECKING:
 
 @dataclass
 class PsycheState:
-    """Point-in-time psychological state used by the PredictiveEngine.
+    """Unified snapshot of the user's psychological state.
 
-    Field mapping with :class:`core.neuro.schema.BrainState`:
+    Attributes
+    ----------
+    user_id:
+        Owner of the state.
+    timestamp:
+        ISO-8601 timestamp when the snapshot was taken.
 
-    +---------------------------+---------------------------+
-    | BrainState field          | PsycheState field         |
-    +===========================+===========================+
-    | emotional_valence         | valence                   |
-    | emotional_arousal         | arousal                   |
-    | (none; always 0.0)        | dominance                 |
-    | active_parts              | active_parts              |
-    | active_needs              | stressor_tags             |
-    | cognitive_load            | cognitive_load            |
-    +---------------------------+---------------------------+
+    Mood (PAD model):
+        valence, arousal, dominance — current affective coordinates.
+        dominant_label — most frequent emotion label in recent window.
+
+    IFS parts:
+        active_parts — list of ``{"key": ..., "subtype": ..., "voice": ...}``
+        dicts for the most recently activated IFS parts.
+
+    NeuroCore:
+        brain_activation — mean activation across all neurons.
+        dominant_neuron_type — neuron type with highest summed activation.
+
+    Cognitive patterns:
+        top_pattern — label of the highest-scoring pattern.
+        pattern_score — score of that pattern (0-1).
+        distortion_count — number of distinct cognitive distortions detected.
+
+    Goals:
+        open_tasks — count of TASK nodes in the graph.
+        active_projects — count of PROJECT nodes.
+
+    Meta:
+        abstraction_level — 0 = raw, 1 = episodic, 2 = semantic.
     """
 
     user_id: str
     timestamp: str
-    valence: float = 0.0           # emotional valence   [-1, +1]
-    arousal: float = 0.0           # physiological arousal [0, 1]
-    dominance: float = 0.0         # sense of control    [-1, +1]
-    active_parts: list[str] = field(default_factory=list)
+
+    # ---- Mood (PAD) -------------------------------------------------------
+    valence: float = 0.0
+    arousal: float = 0.0
+    dominance: float = 0.5
+    dominant_label: str = ""
+
+    # ---- IFS parts ---------------------------------------------------------
+    active_parts: list[dict] = field(default_factory=list)
+
+    # ---- NeuroCore ---------------------------------------------------------
+    brain_activation: float = 0.5
+    dominant_neuron_type: str = ""
+
+    # ---- Cognitive patterns ------------------------------------------------
+    top_pattern: str = ""
+    pattern_score: float = 0.0
+    distortion_count: int = 0
+
+    # ---- Goals -------------------------------------------------------------
+    open_tasks: int = 0
+    active_projects: int = 0
+
+    # ---- Meta --------------------------------------------------------------
+    abstraction_level: int = 0  # 0=raw, 1=episodic, 2=semantic
+
+    # ---- Prediction extras (for EWMA / snapshot extraction) ----------------
     stressor_tags: list[str] = field(default_factory=list)
-    cognitive_load: float = 0.0    # estimated load      [0, 1]
+    cognitive_load: float = 0.0
     dominant_need: str | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
 
-    # ------------------------------------------------------------------
-    # Serialisation
-    # ------------------------------------------------------------------
-
-    def to_dict(self) -> dict[str, Any]:
-        """Return a JSON-serialisable dict representation."""
-        return {
-            "user_id": self.user_id,
-            "timestamp": self.timestamp,
-            "valence": self.valence,
-            "arousal": self.arousal,
-            "dominance": self.dominance,
-            "active_parts": self.active_parts,
-            "stressor_tags": self.stressor_tags,
-            "cognitive_load": self.cognitive_load,
-            "dominant_need": self.dominant_need,
-            "metadata": self.metadata,
-        }
+    # ── Bidirectional conversion with BrainState ──────────────────────────
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "PsycheState":
-        """Construct a :class:`PsycheState` from a plain dict."""
-        return cls(
-            user_id=data.get("user_id", ""),
-            timestamp=data.get("timestamp", ""),
-            valence=float(data.get("valence", 0.0)),
-            arousal=float(data.get("arousal", 0.0)),
-            dominance=float(data.get("dominance", 0.0)),
-            active_parts=list(data.get("active_parts", [])),
-            stressor_tags=list(data.get("stressor_tags", [])),
-            cognitive_load=float(data.get("cognitive_load", 0.0)),
-            dominant_need=data.get("dominant_need"),
-            metadata=dict(data.get("metadata", {})),
-        )
-
-    # ------------------------------------------------------------------
-    # BrainState ↔ PsycheState conversion
-    # ------------------------------------------------------------------
-
-    @classmethod
-    def from_brain_state(cls, brain_state: "BrainState") -> "PsycheState":
-        """Construct a :class:`PsycheState` from a :class:`~core.neuro.schema.BrainState`.
+    def from_brain_state(
+        cls,
+        brain_state: "BrainState",
+    ) -> "PsycheState":
+        """Create a :class:`PsycheState` from a :class:`~core.neuro.schema.BrainState`.
 
         Mapping:
-        - ``BrainState.emotional_valence`` → ``valence``
-        - ``BrainState.emotional_arousal`` → ``arousal``
-        - ``BrainState.active_parts``      → ``active_parts``
-        - ``BrainState.active_needs``      → ``stressor_tags``
-        - ``BrainState.cognitive_load``    → ``cognitive_load``
+            ``emotional_valence`` → ``valence``
+            ``emotional_arousal``  → ``arousal``
+            ``active_parts``       → ``active_parts`` (as ``{"key": p}`` dicts)
+            ``active_needs``       → ``stressor_tags``
+            ``cognitive_load``     → ``cognitive_load``
         """
+        from datetime import UTC, datetime
+
+        now = datetime.now(UTC).isoformat()
         return cls(
             user_id=brain_state.user_id,
-            timestamp=brain_state.timestamp,
+            timestamp=brain_state.timestamp or now,
             valence=brain_state.emotional_valence,
             arousal=brain_state.emotional_arousal,
-            dominance=0.0,
-            active_parts=list(brain_state.active_parts),
+            active_parts=[{"key": p} for p in brain_state.active_parts],
             stressor_tags=list(brain_state.active_needs),
             cognitive_load=brain_state.cognitive_load,
             dominant_need=brain_state.active_needs[0] if brain_state.active_needs else None,
-            metadata=dict(brain_state.metadata),
         )
 
     def to_brain_state(self) -> "BrainState":
-        """Convert this :class:`PsycheState` to a :class:`~core.neuro.schema.BrainState`.
+        """Convert back to a :class:`~core.neuro.schema.BrainState`."""
+        from core.neuro.schema import BrainState as BS
 
-        Mapping:
-        - ``valence``       → ``emotional_valence``
-        - ``arousal``       → ``emotional_arousal``
-        - ``active_parts``  → ``active_parts``
-        - ``stressor_tags`` → ``active_needs``
-        - ``cognitive_load``→ ``cognitive_load``
-        """
-        from core.neuro.schema import BrainState  # local import to avoid circular
+        active_parts: list[str] = []
+        for p in self.active_parts:
+            if isinstance(p, dict):
+                active_parts.append(p.get("key") or p.get("subtype") or "")
+            else:
+                active_parts.append(str(p))
 
-        return BrainState(
+        return BS(
             user_id=self.user_id,
             timestamp=self.timestamp,
             emotional_valence=self.valence,
             emotional_arousal=self.arousal,
-            active_parts=list(self.active_parts),
+            active_parts=[p for p in active_parts if p],
             active_needs=list(self.stressor_tags),
             cognitive_load=self.cognitive_load,
-            metadata=dict(self.metadata),
         )
 
 
 @dataclass
 class PsycheStateForecast:
-    """Short-horizon forecast of the user's psychological state."""
+    """Forecasted PsycheState at a future horizon.
+
+    Produced by :class:`~core.prediction.engine.PredictiveEngine`.
+    """
 
     user_id: str
     horizon_hours: int
-    predicted_valence: float = 0.0
-    predicted_arousal: float = 0.0
-    predicted_dominance: float = 0.0
-    confidence: float = 0.5
-    basis: str = "ewma"
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Return a JSON-serialisable dict representation."""
-        return {
-            "user_id": self.user_id,
-            "horizon_hours": self.horizon_hours,
-            "predicted_valence": self.predicted_valence,
-            "predicted_arousal": self.predicted_arousal,
-            "predicted_dominance": self.predicted_dominance,
-            "confidence": self.confidence,
-            "basis": self.basis,
-            "metadata": self.metadata,
-        }
+    predicted_valence: float
+    predicted_arousal: float
+    predicted_dominance: float
+    predicted_dominant_label: str
+    confidence: float  # 0-1; scales with available data volume
+    created_at: str
 
 
 @dataclass
 class InterventionImpact:
-    """Estimated impact of a therapeutic intervention on mood dimensions."""
+    """Expected impact of a therapeutic intervention on PsycheState.
+
+    Estimated from past :class:`~core.therapy.outcome.OutcomeTracker` data.
+    """
 
     intervention_type: str
-    delta_valence: float = 0.0
-    delta_arousal: float = 0.0
-    delta_dominance: float = 0.0
+    expected_valence_delta: float
+    expected_arousal_delta: float
+    expected_dominance_delta: float
+    confidence: float  # 0-1; scales with sample_count
     sample_count: int = 0
-    confidence: float = 0.0
-
-    def to_dict(self) -> dict[str, Any]:
-        """Return a JSON-serialisable dict representation."""
-        return {
-            "intervention_type": self.intervention_type,
-            "delta_valence": self.delta_valence,
-            "delta_arousal": self.delta_arousal,
-            "delta_dominance": self.delta_dominance,
-            "sample_count": self.sample_count,
-            "confidence": self.confidence,
-        }

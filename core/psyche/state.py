@@ -21,7 +21,6 @@ if TYPE_CHECKING:
     from core.analytics.cognitive_detector import CognitiveDistortionDetector
     from core.graph.api import GraphAPI
     from core.mood.tracker import MoodTracker
-    from core.neuro.schema import BrainState
     from core.parts.memory import PartsMemory
 
 logger = logging.getLogger(__name__)
@@ -105,41 +104,36 @@ class PsycheState:
             confidence=float(data.get("confidence", 1.0)),
         )
 
+    # ── Bidirectional conversion with BrainState ──────────────────────────
+
     @classmethod
-    def from_brain_state(cls, brain_state: "BrainState") -> "PsycheState":
-        """Construct a :class:`PsycheState` from a :class:`~core.neuro.schema.BrainState`.
+    def from_brain_state(cls, brain_state: Any) -> "PsycheState":
+        """Create a :class:`PsycheState` from a :class:`~core.neuro.schema.BrainState`.
 
-        Field mapping:
-
-        - ``BrainState.emotional_valence`` → ``valence``
-        - ``BrainState.emotional_arousal`` → ``arousal``
-        - ``BrainState.active_parts``      → ``active_parts``
-        - ``BrainState.active_needs``      → ``stressor_tags``
-        - ``BrainState.cognitive_load``    → ``cognitive_load``
+        Mapping:
+            ``emotional_valence`` → ``valence``
+            ``emotional_arousal``  → ``arousal``
+            ``active_parts``       → ``active_parts`` (list of part keys)
+            ``active_needs``       → ``stressor_tags``
+            ``cognitive_load``     → ``cognitive_load``
         """
+        from datetime import UTC, datetime
+
+        now = datetime.now(UTC).isoformat()
         return cls(
-            timestamp=brain_state.timestamp,
+            timestamp=getattr(brain_state, "timestamp", now) or now,
             user_id=brain_state.user_id,
             valence=brain_state.emotional_valence,
             arousal=brain_state.emotional_arousal,
             active_parts=list(brain_state.active_parts),
-            dominant_need=brain_state.active_needs[0] if brain_state.active_needs else None,
             stressor_tags=list(brain_state.active_needs),
             cognitive_load=brain_state.cognitive_load,
+            dominant_need=brain_state.active_needs[0] if brain_state.active_needs else None,
         )
 
-    def to_brain_state(self) -> "BrainState":
-        """Convert this :class:`PsycheState` to a :class:`~core.neuro.schema.BrainState`.
-
-        Field mapping:
-
-        - ``valence``       → ``emotional_valence``
-        - ``arousal``       → ``emotional_arousal``
-        - ``active_parts``  → ``active_parts``
-        - ``stressor_tags`` → ``active_needs``
-        - ``cognitive_load``→ ``cognitive_load``
-        """
-        from core.neuro.schema import BrainState  # local import to avoid circular
+    def to_brain_state(self) -> Any:
+        """Convert this state back to a :class:`~core.neuro.schema.BrainState`."""
+        from core.neuro.schema import BrainState
 
         return BrainState(
             user_id=self.user_id,

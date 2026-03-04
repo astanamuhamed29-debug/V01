@@ -1,201 +1,227 @@
-"""PredictiveEngine — EWMA-based psychological state forecasting.
+"""PredictiveEngine — Stage-4 foundation for SELF-OS.
 
-Architecture
-------------
-1. ``get_state_snapshot()``  — build a :class:`~core.prediction.state_model.PsycheState`
-   from the latest mood snapshots stored in :class:`~core.graph.storage.GraphStorage`.
-2. ``predict_next_state()`` — apply an Exponentially Weighted Moving Average
-   (EWMA) over the last *N* snapshots to forecast the near-term state.
-3. ``estimate_intervention_impact()`` — query the ``intervention_outcomes``
-   table (via the public :meth:`GraphStorage.get_avg_intervention_delta`
-   method) to estimate how a given intervention has historically shifted the
-   user's mood dimensions.
+Uses Exponentially Weighted Moving Averages (EWMA) over accumulated
+``mood_snapshots`` to forecast the user's :class:`~core.prediction.state_model.PsycheState`
+at a configurable horizon.
 
-No private methods of :class:`GraphStorage` are accessed here — all data
-access goes through public APIs.
+Architecture (Stage 4 → Stage 5 upgrade path):
+    Stage 4  (current)  — EWMA predictor, lightweight.
+    Stage 4+ (planned)  — Hidden Markov Model (HMM) over PAD triplets.
+    Stage 5  (planned)  — Mamba / SSM model trained on accumulated data.
+
+The public API is stable across all stages::
+
+    engine = PredictiveEngine(storage, outcome_tracker)
+    state   = await engine.build_psyche_state(user_id)
+    forecast = await engine.predict_state(user_id, horizon_hours=24)
+    impact  = await engine.estimate_intervention_impact(user_id, "CBT_reframe")
 """
 
 from __future__ import annotations
 
-import json
 import logging
-from typing import Any
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
-from core.prediction.state_model import (
-    InterventionImpact,
-    PsycheState,
-    PsycheStateForecast,
-)
+from core.prediction.state_model import InterventionImpact, PsycheState, PsycheStateForecast
+
+if TYPE_CHECKING:
+    from core.graph.storage import GraphStorage
+    from core.therapy.outcome import OutcomeTracker
 
 logger = logging.getLogger(__name__)
 
-# EWMA smoothing factor: higher = more weight on recent data
-EWMA_ALPHA: float = 0.3
-
-# Minimum samples needed for a meaningful forecast
-MIN_SAMPLES_FOR_FORECAST: int = 2
+_EWMA_ALPHA = 0.3  # smoothing factor: 0 = no learning, 1 = use only latest
 
 
 class PredictiveEngine:
-    """Forecasting engine for psychological state evolution.
+    """Builds PsycheState snapshots and forecasts future states.
 
     Parameters
     ----------
     storage:
-        A :class:`~core.graph.storage.GraphStorage` instance used for all
-        data access.  Only public methods are called.
+        The main :class:`~core.graph.storage.GraphStorage` instance.
+    outcome_tracker:
+        Optional :class:`~core.therapy.outcome.OutcomeTracker` for
+        intervention-impact estimation.  When ``None``, impact estimates
+        return zero-confidence defaults.
+    alpha:
+        EWMA smoothing factor (default 0.3).
     """
 
-    def __init__(self, storage: Any) -> None:
+    def __init__(
+        self,
+        storage: GraphStorage,
+        outcome_tracker: OutcomeTracker | None = None,
+        alpha: float = _EWMA_ALPHA,
+    ) -> None:
         self._storage = storage
+        self._outcome_tracker = outcome_tracker
+        self._alpha = alpha
 
     # ------------------------------------------------------------------
-    # Public interface
+    # Public API
     # ------------------------------------------------------------------
 
-    async def get_state_snapshot(self, user_id: str) -> PsycheState | None:
-        """Return the latest :class:`PsycheState` for *user_id*.
+    async def build_psyche_state(self, user_id: str) -> PsycheState:
+        """Build a fresh :class:`PsycheState` from current storage data.
 
-        Builds the state from the most recent mood snapshot stored in
-        GraphStorage.  Returns ``None`` if no snapshot is available.
+        Aggregates:
+        * Latest mood snapshot (PAD + dominant label).
+        * Active IFS parts (PART nodes).
+        * Open task / project counts.
         """
-        snapshots = await self._storage.get_mood_snapshots(user_id, limit=1)
-        if not snapshots:
-            return None
-        return self._snapshot_to_state(user_id, snapshots[0])
+        now = datetime.now(UTC).isoformat()
+        state = PsycheState(user_id=user_id, timestamp=now)
 
-    async def predict_next_state(
+        # ---- Mood -----------------------------------------------------------
+        snap = await self._storage.get_latest_mood_snapshot(user_id)
+        if snap:
+            state.valence = float(snap.get("valence_avg") or 0.0)
+            state.arousal = float(snap.get("arousal_avg") or 0.0)
+            state.dominance = float(snap.get("dominance_avg") or 0.5)
+            state.dominant_label = str(snap.get("dominant_label") or "")
+
+        # ---- IFS parts ------------------------------------------------------
+        parts = await self._storage.find_nodes(user_id=user_id, node_type="PART")
+        state.active_parts = [
+            {
+                "key": p.key or "",
+                "subtype": p.metadata.get("subtype") or (p.key or "").replace("part:", ""),
+                "voice": p.metadata.get("voice", ""),
+            }
+            for p in parts[:5]
+        ]
+
+        # ---- Goals ----------------------------------------------------------
+        tasks = await self._storage.find_nodes(user_id=user_id, node_type="TASK")
+        projects = await self._storage.find_nodes(user_id=user_id, node_type="PROJECT")
+        state.open_tasks = len(tasks)
+        state.active_projects = len(projects)
+
+        return state
+
+    async def predict_state(
         self,
         user_id: str,
         horizon_hours: int = 24,
-    ) -> PsycheStateForecast | None:
-        """Forecast the next psychological state using EWMA.
+    ) -> PsycheStateForecast:
+        """Forecast :class:`PsycheState` at *horizon_hours* using EWMA.
+
+        Confidence scales linearly with the number of available snapshots
+        (capped at 0.9 for 30+ snapshots).
 
         Parameters
         ----------
         user_id:
             Target user.
         horizon_hours:
-            How many hours ahead to forecast (informational; affects
-            confidence scaling).
-
-        Returns
-        -------
-        PsycheStateForecast or None
-            ``None`` if insufficient data.
+            How many hours ahead to forecast (informational — the current
+            EWMA model does not use this for regression, but it will be
+            significant once the SSM model is introduced in Stage 4+).
         """
-        snapshots = await self._storage.get_mood_snapshots(user_id, limit=10)
-        if len(snapshots) < MIN_SAMPLES_FOR_FORECAST:
-            return None
+        snapshots = await self._storage.get_mood_snapshots(user_id, limit=30)
+        now = datetime.now(UTC).isoformat()
 
-        states = [self._snapshot_to_state(user_id, s) for s in snapshots]
-        # Oldest first for EWMA
-        states.reverse()
+        if not snapshots:
+            return PsycheStateForecast(
+                user_id=user_id,
+                horizon_hours=horizon_hours,
+                predicted_valence=0.0,
+                predicted_arousal=0.0,
+                predicted_dominance=0.5,
+                predicted_dominant_label="",
+                confidence=0.0,
+                created_at=now,
+            )
 
-        pred_valence = self._ewma([s.valence for s in states])
-        pred_arousal = self._ewma([s.arousal for s in states])
-        pred_dominance = self._ewma([s.dominance for s in states])
+        # Snapshots are ordered DESC (newest first) by get_mood_snapshots.
+        # Build EWMA from oldest to newest.
+        ordered = list(reversed(snapshots))
+        v = float(ordered[0].get("valence_avg") or 0.0)
+        a = float(ordered[0].get("arousal_avg") or 0.0)
+        d = float(ordered[0].get("dominance_avg") or 0.5)
 
-        # Confidence decreases with horizon length
-        confidence = max(0.1, 0.9 - (horizon_hours / 168.0) * 0.4)
+        for snap in ordered[1:]:
+            sv = float(snap.get("valence_avg") or 0.0)
+            sa = float(snap.get("arousal_avg") or 0.0)
+            sd = float(snap.get("dominance_avg") or 0.5)
+            v = self._alpha * sv + (1 - self._alpha) * v
+            a = self._alpha * sa + (1 - self._alpha) * a
+            d = self._alpha * sd + (1 - self._alpha) * d
+
+        # Dominant label from most recent snapshot
+        label = str(snapshots[0].get("dominant_label") or "")
+        confidence = min(0.9, len(snapshots) / 30.0)
 
         return PsycheStateForecast(
             user_id=user_id,
             horizon_hours=horizon_hours,
-            predicted_valence=round(pred_valence, 4),
-            predicted_arousal=round(pred_arousal, 4),
-            predicted_dominance=round(pred_dominance, 4),
+            predicted_valence=round(v, 4),
+            predicted_arousal=round(a, 4),
+            predicted_dominance=round(d, 4),
+            predicted_dominant_label=label,
             confidence=round(confidence, 4),
-            basis="ewma",
+            created_at=now,
         )
 
     async def estimate_intervention_impact(
         self,
         user_id: str,
         intervention_type: str,
-    ) -> InterventionImpact | None:
-        """Estimate historical impact of *intervention_type* on mood.
+    ) -> InterventionImpact:
+        """Estimate the expected PAD delta for *intervention_type*.
 
-        Uses :meth:`GraphStorage.get_avg_intervention_delta` to query the
-        ``intervention_outcomes`` table.  Returns ``None`` if no data.
+        Uses completed outcomes from
+        :class:`~core.therapy.outcome.OutcomeTracker`.  Returns zero-delta
+        with ``confidence=0`` when no data is available.
         """
-        delta = await self._storage.get_avg_intervention_delta(
-            user_id, intervention_type
-        )
-        if delta is None:
-            return None
+        if self._outcome_tracker is None:
+            return InterventionImpact(
+                intervention_type=intervention_type,
+                expected_valence_delta=0.0,
+                expected_arousal_delta=0.0,
+                expected_dominance_delta=0.0,
+                confidence=0.0,
+            )
 
-        sample_count = delta["sample_count"]
-        # Confidence grows with sample count, caps at 0.95
-        confidence = min(0.95, 0.3 + (sample_count / 20.0) * 0.65)
+        outcomes = await self._outcome_tracker.list_outcomes(user_id, limit=100)
+        relevant = [
+            o
+            for o in outcomes
+            if o.intervention_type == intervention_type
+            and o.post_valence is not None
+            and o.pre_valence is not None
+        ]
+
+        if not relevant:
+            return InterventionImpact(
+                intervention_type=intervention_type,
+                expected_valence_delta=0.0,
+                expected_arousal_delta=0.0,
+                expected_dominance_delta=0.0,
+                confidence=0.0,
+            )
+
+        def _mean_delta(pre_attr: str, post_attr: str) -> float:
+            deltas = []
+            for o in relevant:
+                pre = getattr(o, pre_attr, None)
+                post = getattr(o, post_attr, None)
+                if pre is not None and post is not None:
+                    deltas.append(float(post) - float(pre))
+            return sum(deltas) / len(deltas) if deltas else 0.0
+
+        v_delta = _mean_delta("pre_valence", "post_valence")
+        a_delta = _mean_delta("pre_arousal", "post_arousal")
+        d_delta = _mean_delta("pre_dominance", "post_dominance")
+        confidence = min(0.9, len(relevant) / 20.0)
 
         return InterventionImpact(
             intervention_type=intervention_type,
-            delta_valence=delta["delta_valence"],
-            delta_arousal=delta["delta_arousal"],
-            delta_dominance=delta["delta_dominance"],
-            sample_count=sample_count,
+            expected_valence_delta=round(v_delta, 4),
+            expected_arousal_delta=round(a_delta, 4),
+            expected_dominance_delta=round(d_delta, 4),
             confidence=round(confidence, 4),
-        )
-
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _ewma(values: list[float], alpha: float = EWMA_ALPHA) -> float:
-        """Apply EWMA and return the smoothed last value."""
-        if not values:
-            return 0.0
-        result = values[0]
-        for v in values[1:]:
-            result = alpha * v + (1.0 - alpha) * result
-        return result
-
-    @staticmethod
-    def _snapshot_to_state(user_id: str, snapshot: dict[str, Any]) -> PsycheState:
-        """Convert a raw mood snapshot dict to a :class:`PsycheState`.
-
-        Extracts ``cognitive_load`` and ``dominant_need`` from the snapshot
-        when available; falls back to sensible defaults otherwise.
-        """
-        # Extract active_parts from JSON column if present
-        active_parts_raw = snapshot.get("active_parts_keys", "[]")
-        try:
-            active_parts: list[str] = json.loads(active_parts_raw) if active_parts_raw else []
-        except (json.JSONDecodeError, TypeError):
-            active_parts = []
-
-        # Extract stressor tags
-        stressor_raw = snapshot.get("stressor_tags", "[]")
-        try:
-            stressor_tags: list[str] = json.loads(stressor_raw) if stressor_raw else []
-        except (json.JSONDecodeError, TypeError):
-            stressor_tags = []
-
-        # Extract cognitive_load — may be stored directly in the snapshot
-        cognitive_load = float(snapshot.get("cognitive_load") or 0.0)
-
-        # Extract dominant_need from active_needs JSON or explicit key
-        dominant_need: str | None = snapshot.get("dominant_need")
-        if dominant_need is None:
-            active_needs_raw = snapshot.get("active_needs_json", "[]")
-            try:
-                active_needs: list[str] = (
-                    json.loads(active_needs_raw) if active_needs_raw else []
-                )
-                dominant_need = active_needs[0] if active_needs else None
-            except (json.JSONDecodeError, TypeError):
-                dominant_need = None
-
-        return PsycheState(
-            user_id=user_id,
-            timestamp=str(snapshot.get("timestamp", "")),
-            valence=float(snapshot.get("valence_avg", 0.0) or 0.0),
-            arousal=float(snapshot.get("arousal_avg", 0.0) or 0.0),
-            dominance=float(snapshot.get("dominance_avg", 0.0) or 0.0),
-            active_parts=active_parts,
-            stressor_tags=stressor_tags,
-            cognitive_load=cognitive_load,
-            dominant_need=dominant_need,
+            sample_count=len(relevant),
         )

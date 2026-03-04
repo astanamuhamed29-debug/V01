@@ -86,8 +86,6 @@ class MessageProcessor:
         self.session_memory = session_memory
         self.calibrator = calibrator
         self.background_mode = background_mode
-        self._orchestrator = orchestrator
-        self._neuro_bridge = neuro_bridge
         effective_llm = llm_client or MockLLMClient()
         effective_bus = event_bus or EventBus()
 
@@ -105,6 +103,8 @@ class MessageProcessor:
 
         self._calibrator_loaded: set[str] = set()
         self._pending_tasks: list[asyncio.Task] = []
+        self._orchestrator = orchestrator
+        self._neuro_bridge = neuro_bridge
 
         # Insight engine — runs after every analysis pass
         self._insight_engine = InsightEngine(graph_api=graph_api)
@@ -191,29 +191,27 @@ class MessageProcessor:
         if dec.brain_state:
             ori.graph_context["brain_state"] = dec.brain_state
 
-        # 3c. ORCHESTRATOR — optional multi-agent analysis (if wired in)
+        # 3b. ORCHESTRATOR (optional) — run agent chain and merge results
         if self._orchestrator is not None:
-            from core.pipeline.orchestrator import AgentContext
-
-            agent_ctx = AgentContext(
-                user_id=user_id,
-                text=obs.text,
-                intent=ori.intent,
-                graph_context=ori.graph_context,
-                mood_context=dec.mood_context,
-                parts_context=dec.parts_context,
-            )
             try:
+                from core.pipeline.orchestrator import AgentContext
+                agent_ctx = AgentContext(
+                    user_id=user_id,
+                    text=obs.text,
+                    intent=ori.intent,
+                    graph_context=ori.graph_context,
+                    mood_context=dec.mood_context,
+                    parts_context=dec.parts_context,
+                )
                 orch_result = await self._orchestrator.run(agent_ctx)
-                # Merge orchestrator results into pipeline context
                 if orch_result.reply_fragment:
                     ori.graph_context["orchestrator_fragment"] = orch_result.reply_fragment
                 if orch_result.metadata:
                     ori.graph_context.setdefault("orchestrator_meta", {}).update(orch_result.metadata)
-            except Exception as _orch_exc:
-                logger.warning("AgentOrchestrator failed: %s", _orch_exc)
+            except Exception as exc:
+                logger.warning("AgentOrchestrator failed: %s — continuing without it", exc)
 
-        # 3b. INSIGHT — detect cross-pattern insights from new + historical data
+        # 3c. INSIGHT — detect cross-pattern insights from new + historical data
         insight_nodes = await self._insight_engine.run(
             user_id=user_id,
             new_nodes=ori.created_nodes,
@@ -266,14 +264,14 @@ class MessageProcessor:
         mood_context = await self.mood_tracker.get_current(user_id)
         parts_context = graph_context.get("known_parts", [])[:3]
 
-        # ── Inject NeuroCore brain_state if available ─────────────
+        # ── Inject brain_state from NeuroCore (if available) ────────
         if self._neuro_bridge is not None:
             try:
-                brain_state = await self._neuro_bridge.get_brain_state(user_id)
-                if brain_state is not None:
+                brain_state = await self._neuro_bridge.get_latest_brain_state(user_id)
+                if brain_state:
                     graph_context["brain_state"] = brain_state
-            except Exception as _nb_exc:
-                logger.debug("NeuroBridge.get_brain_state failed in background: %s", _nb_exc)
+            except Exception as exc:
+                logger.debug("Background brain_state fetch failed: %s", exc)
 
         # ── Register per-user tools ──────────────────────────────
         self._register_user_tools(user_id)

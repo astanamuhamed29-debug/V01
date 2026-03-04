@@ -1,6 +1,6 @@
 # SELF-OS Architecture
 
-> Stage 3 — Agentic Functions (Stable)
+> Stage 1 — Knowledge Graph Core (Complete)
 
 This document describes the internal architecture of SELF-OS: how messages flow through the system, how modules interact, and what each component is responsible for.
 
@@ -10,230 +10,24 @@ This document describes the internal architecture of SELF-OS: how messages flow 
 
 1. [System Overview](#1-system-overview)
 2. [OODA Pipeline](#2-ooda-pipeline)
-3. [InnerCouncil (IFS Debate)](#3-innercouncil-ifs-debate)
-4. [NeuroCore](#4-neurocore)
-5. [PredictiveEngine](#5-predictiveengine)
-6. [DTO Reference](#6-dto-reference)
-7. [Database Schemas](#7-database-schemas)
-8. [Integration Points](#8-integration-points)
-9. [Extension Guide](#9-extension-guide)
-10. [Storage Layer](#10-storage-layer)
-11. [Analytics Engine](#11-analytics-engine)
-12. [Memory Lifecycle](#12-memory-lifecycle)
-13. [Therapy & Policy Learning](#13-therapy--policy-learning)
-14. [Module Reference](#14-module-reference)
+3. [Storage Layer](#3-storage-layer)
+4. [Analytics Engine](#4-analytics-engine)
+5. [Memory Lifecycle](#5-memory-lifecycle)
+6. [Therapy & Policy Learning](#6-therapy--policy-learning)
+7. [RAG & Search](#7-rag--search)
+8. [Scheduling](#8-scheduling)
+9. [Interfaces](#9-interfaces)
+10. [Module Reference](#10-module-reference)
 
 ---
 
 ## 1. System Overview
 
-```
-User Message
-     │
-     ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                     OODA Pipeline (MessageProcessor)                │
-│                                                                     │
-│  OBSERVE ──► ORIENT ──► DECIDE ──► (Orchestrator?) ──► ACT         │
-│    │           │           │               │              │         │
-│  Journal    LLM ext.    Policy         Agent chain    LLM Reply     │
-│  Session    Graph        Mood          (IFS/Semantic)               │
-│  Intent     Embed        Parts         Merge results                │
-│             RAG          NeuroCore ◄────────────────────────        │
-│                          Brain state                                │
-└─────────────────────────────────────────────────────────────────────┘
-        │                     │                      │
-        ▼                     ▼                      ▼
-  GraphStorage           NeuroCore           PredictiveEngine
-  (SQLite/Neo4j)      (Neurons/Synapses     (EWMA Forecaster)
-        │              Hebbian+BFS)                  │
-        └──────────────────────┴────────────────────┘
-                               │
-                         InnerCouncil
-                     (IFS 2-round Debate)
-                               │
-                        CouncilVerdict
-                    (dominant part + positions)
-```
-
-## Data Flow
-
-1. **OBSERVE** — sanitize input, journal to SQLite, classify intent, update session memory.
-2. **ORIENT** — LLM extraction of graph nodes (emotions, beliefs, needs, parts), embed, RAG search, build `graph_context`.
-3. **DECIDE** — select response policy, compute mood context, parts context, invoke NeuroCore via `NeuroBridge`, inject `brain_state` into `graph_context`.
-4. **Orchestrator (optional)** — if `AgentOrchestrator` is wired, run agent chain (SemanticExtractor → EmotionAnalysis → PartsDetector → ConflictResolver → InsightGenerator) and merge `reply_fragment` + `metadata` into `graph_context`.
-5. **ACT** — generate LLM reply using full `graph_context`, store session memory, publish events.
-
----
-
-## 3. InnerCouncil (IFS Debate)
-
-`agents/ifs/council.py` + `agents/ifs/parts.py`
-
-### Round 1 — Independent Analysis
-
-Each of the four IFS Part agents (`CriticAgent`, `FirefighterAgent`, `ExileAgent`, `SelfAgent`) independently analyses the user message and returns a `PartPosition` with `confidence` and `position` text.
-
-### Round 2 — Debate (council_log aware)
-
-Each Part receives the full `council_log` from Round 1 and adjusts its stance:
-
-| Part | Adjustment in Round 2 |
-|---|---|
-| `CriticAgent` | If ExileAgent confidence > 0.5 → soften ("not the time for criticism") |
-| `ExileAgent` | If CriticAgent confidence > 0.5 → increase need for safety |
-| `FirefighterAgent` | If ExileAgent confidence > 0.5 → increase urgency |
-| `SelfAgent` | Synthesises based on all Round-1 positions |
-
-### Shared Signals
-
-`agents/ifs/signals.py` provides `PART_SIGNALS` and `EMOTION_SIGNALS` dictionaries used by both `parts.py` and `orchestrator.py` to avoid duplication.
-
----
-
-## 4. NeuroCore
-
-`core/neuro/engine.py`
-
-| Method | Description |
-|---|---|
-| `activate()` | Activate a neuron (create if absent); Hebbian learning |
-| `propagate()` | BFS spreading activation (iterative, no recursion) |
-| `decay_cycle()` | Reduce activation of neurons with `activation > 0` |
-| `hebbian_strengthen()` | Batch-strengthen synapses via single IN-clause query |
-| `cleanup_dormant()` | Soft-delete neurons below threshold, not activated in N days |
-| `get_brain_state()` | Compute current `BrainState` from active neurons |
-
-`NeuroBridge` (`core/neuro/bridge.py`) integrates NeuroCore with the OODA pipeline. `DecideStage` accepts an optional `neuro_bridge` parameter.
-
----
-
-## 5. PredictiveEngine
-
-`core/prediction/engine.py`
-
-Uses only public `GraphStorage` APIs:
-
-- `storage.get_mood_snapshots()` — for EWMA state forecasting
-- `storage.get_avg_intervention_delta()` — for intervention impact estimation
-
-No private method access (`_ensure_initialized`, `_get_conn`) is permitted.
-
----
-
-## 6. DTO Reference
-
-| Class | Module | Description |
-|---|---|---|
-| `Node` | `core/graph/model.py` | Knowledge graph node |
-| `Edge` | `core/graph/model.py` | Knowledge graph edge |
-| `BrainState` | `core/neuro/schema.py` | NeuroCore state snapshot |
-| `PsycheState` | `core/psyche/state.py` | Full user-facing psychological state |
-| `PsycheState` | `core/prediction/state_model.py` | Prediction-layer state (EWMA input) |
-| `AgentContext` | `core/pipeline/orchestrator.py` | Agent chain input |
-| `AgentResult` | `core/pipeline/orchestrator.py` | Agent chain output |
-| `CouncilVerdict` | `agents/ifs/parts.py` | IFS debate result |
-| `PartPosition` | `agents/ifs/parts.py` | Single Part's position |
-| `PsycheStateForecast` | `core/prediction/state_model.py` | EWMA forecast |
-| `InterventionImpact` | `core/prediction/state_model.py` | Intervention delta |
-
-### BrainState ↔ PsycheState Mapping
-
-| `BrainState` field | `PsycheState` field (psyche) | `PsycheState` field (prediction) |
-|---|---|---|
-| `emotional_valence` | `valence` | `valence` |
-| `emotional_arousal` | `arousal` | `arousal` |
-| `active_parts` | `active_parts` | `active_parts` |
-| `active_needs` | `stressor_tags` | `stressor_tags` |
-| `cognitive_load` | `cognitive_load` | `cognitive_load` |
-
-Conversion:
-- `PsycheState.from_brain_state(brain_state)` → `PsycheState`
-- `psyche_state.to_brain_state()` → `BrainState`
-
----
-
-## 7. Database Schemas
-
-### SQLite (`data/self_os.db`)
-
-Key tables:
-
-| Table | Description |
-|---|---|
-| `nodes` | Graph nodes (id, user_id, type, name, text, key, metadata_json) |
-| `edges` | Graph edges (id, user_id, source_node_id, target_node_id, relation) |
-| `mood_snapshots` | VAD mood snapshots with stressor_tags, active_parts |
-| `intervention_outcomes` | Pre/post VAD for each intervention |
-| `scheduler_state` | Proactive scheduler state per user |
-| `signal_feedback` | RLHF feedback records |
-
-### NeuroCore DB (`data/neuro.db`)
-
-| Table | Description |
-|---|---|
-| `neurons` | Neural units (activation, valence, arousal, decay_rate) |
-| `synapses` | Hebbian connections (source_neuron_id, target_neuron_id, weight) |
-| `brain_state_snapshots` | Historical BrainState snapshots |
-
----
-
-## 8. Integration Points
-
-### NeuroCore ↔ Pipeline
+SELF-OS is structured as a layered system with clear boundaries:
 
 ```
-DecideStage(neuro_bridge=NeuroBridge(neuro_core))
-    │
-    ▼
-NeuroBridge.process_observation(user_id, obs_data)
-    │
-    ▼
-NeuroCore.activate() / propagate() / get_brain_state()
-    │
-    ▼
-DecideResult.brain_state → graph_context["brain_state"]
-```
-
-### InnerCouncil ↔ Orchestrator
-
-The `AgentOrchestrator` can optionally invoke `InnerCouncil` for messages with emotional/IFS content. The `PartsDetectorAgent` inside the orchestrator uses the same `PART_SIGNALS` as the IFS agents.
-
-### PredictiveEngine ↔ GraphStorage
-
-```python
-engine = PredictiveEngine(storage=graph_storage)
-forecast = await engine.predict_next_state(user_id)
-impact   = await engine.estimate_intervention_impact(user_id, "CBT")
-```
-
----
-
-## 9. Extension Guide
-
-### Adding a new IFS Part type
-
-1. Add keywords to `agents/ifs/signals.py::PART_SIGNALS`.
-2. Subclass `IFSPartAgent` in `agents/ifs/parts.py`.
-3. Implement `deliberate(context, council_log)` with Round 2 awareness.
-4. Register in `build_default_parts()`.
-
-### Adding a new Agent to the Orchestrator
-
-1. Subclass `BaseAgent` in `core/pipeline/orchestrator.py`.
-2. Implement `async def run(context: AgentContext) -> AgentResult`.
-3. Add to `_AGENTS` registry.
-4. Wire into `_INTENT_CHAINS` for relevant intents.
-
-### Adding a new Tool
-
-1. Subclass `BaseTool` in `core/tools/base.py`.
-2. Implement `async def execute(args) -> ToolResult`.
-3. Register in `build_default_tools()` in `core/tools/memory_tools.py`.
-
----
-
-
+┌─────────────────────────────────────────────────────────────┐
+│  INTERFACES           CLI · Telegram Bot · Factory          │
 ├─────────────────────────────────────────────────────────────┤
 │  PIPELINE             OBSERVE → ORIENT → DECIDE → ACT      │
 ├─────────────────────────────────────────────────────────────┤

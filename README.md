@@ -1,39 +1,36 @@
-# SELF-OS — Psychological AI Digital Twin
+# SELF-OS — Personal Cognitive Operating System
 
-> **Stage 3: Agentic Functions — Stable**
+**Stage 3: Agentic Functions — Stable**
 
-SELF-OS is a production-grade psychological AI assistant that builds a living
-"digital twin" of the user's inner world.  It continuously observes user
-messages, updates a neurobiological model of emotions and beliefs, runs
-Internal Family Systems (IFS) debates between internal Parts, and predicts
-near-term mood trajectories — all to provide deeply personalised, therapeutic
-dialogue.
-
----
+SELF-OS is an AI-powered personal cognitive operating system that builds and maintains a semantic knowledge graph from natural conversations. It models identity, emotions, beliefs, needs, and behavioral patterns — enabling deep self-awareness and intelligent assistance.
 
 ## Recent Updates (March 2026 — Stage 3 Stabilization)
 
-- **InnerCouncil** (`agents/ifs/`) — 2-round IFS debate with genuine Round 2
-  position adjustment (CriticAgent softens when Exile has high pain; ExileAgent
-  amplifies need for safety when Critic dominates; FirefighterAgent raises
-  urgency when Exile is activated).
-- **PredictiveEngine** (`core/prediction/`) — EWMA state forecasting with
-  `PsycheState` / `PsycheStateForecast` / `InterventionImpact` DTOs.  Uses
-  only public `GraphStorage` APIs — no private method access.
-- **Shared IFS signals** (`agents/ifs/signals.py`) — single `PART_SIGNALS` /
-  `EMOTION_SIGNALS` dict used by both InnerCouncil and AgentOrchestrator.
-- **AgentOrchestrator wired** — `MessageProcessor` now accepts an optional
-  `orchestrator` parameter; when present, runs agent chain after DECIDE and
-  merges results into graph context.
-- **Background brain_state** — `_process_background()` now injects NeuroCore
-  brain state into graph context when `neuro_bridge` is available.
-- **PsycheState ↔ BrainState** bidirectional conversion via
-  `PsycheState.from_brain_state()` / `PsycheState.to_brain_state()`.
-- **NeuroCore performance** — Hebbian strengthening reduced from O(n²) to O(1)
-  SQL round-trips; `propagate()` rewritten to iterative BFS; `decay_cycle()`
-  skips already-dormant neurons; new `cleanup_dormant()` method.
-- **`intervention_outcomes`** DDL and public `get_avg_intervention_delta()`
-  method added to `GraphStorage`.
+- **InnerCouncil** (`agents/ifs/`) — genuine 2-round IFS debate: each Part agent reacts to peers in Round 2 (Critic softens when Exile in pain, Exile amplifies safety need when Critic dominant, Firefighter raises urgency when Exile active).
+- **PredictiveEngine** (`core/prediction/`) — EWMA forecasting with `PsycheState` / `PsycheStateForecast` / `InterventionImpact` DTOs using only public `GraphStorage` APIs.
+- **Shared IFS signals** (`agents/ifs/signals.py`) — single source of truth for `PART_SIGNALS`/`EMOTION_SIGNALS` used by both InnerCouncil and AgentOrchestrator.
+- **AgentOrchestrator wired** — `MessageProcessor` accepts optional `orchestrator` param; results merged into `graph_context` after DECIDE.
+- **Background brain_state** — `_process_background()` injects NeuroCore brain state into graph context when `neuro_bridge` is available.
+- **PsycheState ↔ BrainState** bidirectional conversion via `from_brain_state()` / `to_brain_state()` in both `core/psyche/state.py` and `core/prediction/state_model.py`.
+- **NeuroCore performance** — Hebbian strengthening O(n²) → O(1) SQL; `propagate()` iterative BFS; `decay_cycle()` skips dormant neurons; new `cleanup_dormant()`.
+- **`intervention_outcomes`** DDL + public `get_avg_intervention_delta()` in `GraphStorage`.
+
+## Previous Updates (March 2026)
+
+- Added **L2 AnalysisEngine** (`core/analytics/analysis_engine.py`) with strict schema validation, fallback safety path, and fusion/provenance outputs.
+- Implemented **true hybrid fusion** (semantic + statistical) with pair deduplication, merged evidence refs, and conflict-aware direction handling.
+- Added **async L2 scheduling** in `MessageProcessor` and dedicated SQLite persistence table `l2_analysis_artifacts`.
+- Enabled **LLM causal validation** in frontier analytics path (`CAUSAL_VALIDATE_WITH_LLM=true` by default).
+- Improved reliability with **LLM retry + JSON repair** before fallback.
+- Fixed extractor consistency: **SOMA keys are now deterministic and non-null** (regex + LLM parser paths).
+- Added integration/report tooling for 7-message full-system diagnostics:
+    - `scripts/run_7sms_full_report.py`
+    - `scripts/print_7sms_summary.py`
+
+Validation highlights:
+- `tests/test_analysis_engine.py`
+- `tests/test_processor_l2_scheduler.py`
+- `tests/test_simulation_dialogue.py`
 
 ---
 
@@ -254,8 +251,11 @@ V999/
 
 | Document | Description |
 |---|---|
+| [docs/VISION.md](docs/VISION.md) | Product vision: three pillars, user journey, and why now |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Technical roadmap: Stages 1–5, what's built and what's planned |
+| [docs/PRICING.md](docs/PRICING.md) | Pricing strategy, tiers, unit economics, and go-to-market |
+| [docs/COMPETITIVE.md](docs/COMPETITIVE.md) | Competitive landscape, matrix analysis, and differentiation |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Detailed system architecture and module interactions |
-| [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Complete configuration reference |
 | [docs/FRONTIER_VISION_REPORT.md](docs/FRONTIER_VISION_REPORT.md) | Vision roadmap: Stage 1 → Stage 5 |
 | [deploy/VPS_DEPLOY.md](deploy/VPS_DEPLOY.md) | Production VPS deployment guide |
 

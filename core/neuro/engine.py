@@ -525,7 +525,6 @@ class NeuroCore:
         await self._ensure_initialized()
         assert self._conn is not None
 
-        # Use a simple date arithmetic via SQLite strftime
         cutoff_modifier = f"-{max_age_days} days"
         async with self._lock:
             cursor = await self._conn.execute(

@@ -1,26 +1,29 @@
-"""IFS (Internal Family Systems) Part agents for the InnerCouncil debate system.
+"""IFS (Internal Family Systems) part agents for the InnerCouncil.
 
-Each *Part* is a sub-personality that analyses the user's message and produces a
-position with a confidence score.  The :class:`InnerCouncil` runs two rounds:
+Each agent represents one IFS role and produces a short voiced perspective
+on the current situation.  All agents share the same lightweight interface::
 
-- **Round 1**: all Parts analyse the raw message independently.
-- **Round 2**: each Part re-evaluates, taking into account what other Parts said
-  in Round 1 (council_log).  This is the actual debate — each Part adjusts its
-  stance when it observes strong positions from peers.
+    result = await agent.respond(context)
+
+Agents are **pure** (no I/O side-effects) and intentionally simple — they
+apply keyword heuristics so they work without an LLM call.  When an LLM
+client is injected the agent can optionally escalate to a richer response.
+
+Roles (IFS model):
+    CriticAgent       — inner Critic / Protector Manager.
+    FirefighterAgent  — impulsive Firefighter / escape protector.
+    ExileAgent        — wounded Exile / inner child.
+    SelfAgent         — the compassionate Self / observer.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
-
-from agents.ifs.signals import EMOTION_SIGNALS, PART_SIGNALS
-
-if TYPE_CHECKING:
-    from core.llm_client import LLMClient
+from typing import Any
 
 logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # DTOs
@@ -28,392 +31,283 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class PartPosition:
-    """Position expressed by a single IFS Part during deliberation."""
-
-    part_name: str
-    position: str
-    confidence: float        # 0.0 – 1.0
-    needs: list[str] = field(default_factory=list)
-    fears: list[str] = field(default_factory=list)
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class CouncilVerdict:
-    """Aggregated result produced by the full InnerCouncil debate."""
-
-    dominant_part: str
-    consensus_text: str
-    positions: list[PartPosition] = field(default_factory=list)
-    round1_log: list[PartPosition] = field(default_factory=list)
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-
-# ---------------------------------------------------------------------------
-# Agent context
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class IFSContext:
-    """Context passed to each Part agent."""
+class IFSAgentContext:
+    """Input context shared with every IFS part agent."""
 
     user_id: str
     text: str
-    metadata: dict[str, Any] = field(default_factory=dict)
+    intent: str
+    mood_context: dict[str, Any] = field(default_factory=dict)
+    parts_context: list[dict[str, Any]] = field(default_factory=list)
+    graph_context: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class IFSAgentResult:
+    """Perspective voiced by a single IFS part agent."""
+
+    part_role: str        # "critic" | "firefighter" | "exile" | "self"
+    voice: str            # Short voiced statement (1-3 sentences)
+    need: str = ""        # Underlying need this part is protecting
+    recommendation: str = ""  # What this part suggests
 
 
 # ---------------------------------------------------------------------------
-# Base class
+# Base
 # ---------------------------------------------------------------------------
 
 
-class IFSPartAgent:
-    """Abstract base for an IFS Part agent.
+class _BaseIFSAgent:
+    role: str = "base"
 
-    Subclasses implement :meth:`deliberate` to analyse the user message and
-    return a :class:`PartPosition`.
-
-    Parameters
-    ----------
-    llm_client:
-        Optional LLM client.  When provided, :meth:`deliberate` may use
-        :attr:`voice_prompt` as a system prompt to generate a richer
-        response via the LLM.  When ``None``, the keyword-based fallback
-        logic runs instead.
-    """
-
-    name: str = "base"
-    voice_prompt: str = ""
-
-    def __init__(self, llm_client: "LLMClient | None" = None) -> None:
-        self._llm = llm_client
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    def _keyword_score(self, text: str, keywords: list[str]) -> float:
-        """Return a simple keyword-hit score in [0, 1]."""
-        t = text.lower()
-        hits = sum(1 for kw in keywords if kw in t)
-        return min(hits / max(len(keywords), 1), 1.0)
-
-    async def _llm_deliberate(
-        self,
-        context: IFSContext,
-        council_log: list[PartPosition],
-    ) -> str | None:
-        """Use LLM to generate a nuanced position using *voice_prompt*.
-
-        Returns the generated text or ``None`` if the call fails / is
-        unavailable.
-        """
-        if self._llm is None:
-            return None
-        try:
-            council_summary = ""
-            if council_log:
-                lines = [
-                    f"{p.part_name} (confidence={p.confidence:.2f}): {p.position}"
-                    for p in council_log
-                ]
-                council_summary = "\n".join(lines)
-
-            prompt_parts = [f"Сообщение пользователя: {context.text}"]
-            if council_summary:
-                prompt_parts.append(
-                    f"\nМнения других частей:\n{council_summary}"
-                )
-            prompt_parts.append(
-                "\nВыскажи свою позицию кратко (1-2 предложения)."
-            )
-
-            response = await self._llm.complete(
-                system=self.voice_prompt,
-                user="\n".join(prompt_parts),
-            )
-            return response.strip() if response else None
-        except Exception as exc:
-            logger.debug("LLM deliberate failed for %s: %s", self.name, exc)
-            return None
-
-    # ------------------------------------------------------------------
-    # Public interface
-    # ------------------------------------------------------------------
-
-    async def deliberate(
-        self,
-        context: IFSContext,
-        council_log: list[PartPosition] | None = None,
-    ) -> PartPosition:
-        """Produce a :class:`PartPosition` for *context*.
-
-        Subclasses should override this method.  The base implementation
-        returns a neutral position.
-
-        Parameters
-        ----------
-        context:
-            The user's message context.
-        council_log:
-            Positions from other Parts expressed in Round 1.  Subclasses
-            use this to adjust their stance in Round 2.
-        """
-        return PartPosition(
-            part_name=self.name,
-            position="Наблюдаю.",
-            confidence=0.3,
-        )
+    async def respond(self, context: IFSAgentContext) -> IFSAgentResult:  # pragma: no cover
+        raise NotImplementedError
 
 
 # ---------------------------------------------------------------------------
-# Concrete Part agents
+# Specialised agents
 # ---------------------------------------------------------------------------
 
 
-class CriticAgent(IFSPartAgent):
-    """The inner Critic — holds standards and points out failures.
+class CriticAgent(_BaseIFSAgent):
+    """Inner Critic / Manager.
 
-    In Round 2, if ExileAgent expressed high pain (confidence > 0.5), the
-    Critic softens its stance to avoid overwhelming the Exile.
+    Activates on self-blame, distortions, perfectionism signals.
+    Goal: protect the person from failure via high standards.
     """
 
-    name = "Критик"
-    voice_prompt = (
-        "Ты — внутренний Критик. Твоя роль: указывать на ошибки и зоны роста, "
-        "поддерживать высокие стандарты. Говори прямо, но не жестоко."
-    )
+    role = "critic"
 
-    async def deliberate(
-        self,
-        context: IFSContext,
-        council_log: list[PartPosition] | None = None,
-    ) -> PartPosition:
-        """Evaluate the message; soften if Exile expressed high pain."""
-        text = context.text
-
-        # Try LLM first
-        llm_text = await self._llm_deliberate(context, council_log or [])
-
-        # Keyword-based confidence
-        critic_keywords = PART_SIGNALS.get("CRITIC", [])
-        base_conf = max(0.2, self._keyword_score(text, critic_keywords) + 0.3)
-
-        position = llm_text or (
-            "Я замечаю, что здесь есть пространство для улучшения. "
-            "Важно быть честным с собой."
-        )
-
-        # Round 2 adjustment: if Exile has high pain, soften
-        if council_log:
-            exile_positions = [p for p in council_log if p.part_name == "Изгнанник"]
-            if exile_positions and exile_positions[0].confidence > 0.5:
-                base_conf = max(0.1, base_conf - 0.25)
-                if not llm_text:
-                    position = (
-                        "Вижу, что сейчас не время для критики. "
-                        "Сначала нужно позаботиться о боли."
-                    )
-
-        return PartPosition(
-            part_name=self.name,
-            position=position,
-            confidence=min(base_conf, 1.0),
-            needs=["качество", "совершенство"],
-            fears=["провал", "осуждение"],
-        )
-
-
-class FirefighterAgent(IFSPartAgent):
-    """The Firefighter — acts impulsively to douse emotional pain.
-
-    In Round 2, if ExileAgent has high activation, urgency increases.
-    """
-
-    name = "Пожарный"
-    voice_prompt = (
-        "Ты — Пожарный. Твоя роль: срочно погасить боль любым способом. "
-        "Действуй быстро, даже если это создаёт новые проблемы."
-    )
-
-    async def deliberate(
-        self,
-        context: IFSContext,
-        council_log: list[PartPosition] | None = None,
-    ) -> PartPosition:
-        """Evaluate urgency; increase if Exile is highly activated."""
-        text = context.text
-
-        llm_text = await self._llm_deliberate(context, council_log or [])
-
-        ff_keywords = PART_SIGNALS.get("FIREFIGHTER", [])
-        base_conf = max(0.15, self._keyword_score(text, ff_keywords) + 0.2)
-
-        position = llm_text or (
-            "Нужно срочно что-то сделать, чтобы стало лучше прямо сейчас."
-        )
-
-        # Round 2: if Exile has high activation, Firefighter urgency increases
-        if council_log:
-            exile_positions = [p for p in council_log if p.part_name == "Изгнанник"]
-            if exile_positions and exile_positions[0].confidence > 0.5:
-                base_conf = min(1.0, base_conf + 0.3)
-                if not llm_text:
-                    position = (
-                        "Боль нарастает. Мне нужно действовать немедленно, "
-                        "чтобы облегчить это страдание."
-                    )
-
-        return PartPosition(
-            part_name=self.name,
-            position=position,
-            confidence=min(base_conf, 1.0),
-            needs=["безопасность", "облегчение"],
-            fears=["боль", "страдание"],
-        )
-
-
-class ExileAgent(IFSPartAgent):
-    """The Exile — carries the original wound and unmet needs.
-
-    In Round 2, if Critic dominated, the Exile's need for safety increases.
-    """
-
-    name = "Изгнанник"
-    voice_prompt = (
-        "Ты — Изгнанник. Ты несёшь старую боль и невыполненные потребности. "
-        "Говори об уязвимости, страхе быть отвергнутым, глубокой нужде в любви."
-    )
-
-    async def deliberate(
-        self,
-        context: IFSContext,
-        council_log: list[PartPosition] | None = None,
-    ) -> PartPosition:
-        """Evaluate vulnerability; boost safety need if Critic dominated."""
-        text = context.text
-
-        llm_text = await self._llm_deliberate(context, council_log or [])
-
-        exile_keywords = PART_SIGNALS.get("EXILE", [])
-        emotion_pain = EMOTION_SIGNALS.get("стыд", []) + EMOTION_SIGNALS.get("вина", [])
-        base_conf = max(0.1, self._keyword_score(text, exile_keywords + emotion_pain) + 0.15)
-
-        position = llm_text or (
-            "Мне больно. Я чувствую себя одиноким и непонятым."
-        )
-
-        # Round 2: if Critic dominated, Exile's need for safety increases
-        if council_log:
-            critic_positions = [p for p in council_log if p.part_name == "Критик"]
-            if critic_positions and critic_positions[0].confidence > 0.5:
-                base_conf = min(1.0, base_conf + 0.3)
-                if not llm_text:
-                    position = (
-                        "Критик давит на меня. Мне нужна безопасность и принятие, "
-                        "а не ещё больше осуждения."
-                    )
-
-        return PartPosition(
-            part_name=self.name,
-            position=position,
-            confidence=min(base_conf, 1.0),
-            needs=["принятие", "безопасность", "любовь"],
-            fears=["отвержение", "осуждение", "одиночество"],
-        )
-
-
-class SelfAgent(IFSPartAgent):
-    """The Self — the compassionate, curious center that can lead healing.
-
-    Uses council_log to synthesise a balanced response from all Parts.
-    """
-
-    name = "Самость"
-    voice_prompt = (
-        "Ты — Самость. Ты мудрый, спокойный, сострадательный наблюдатель. "
-        "Видишь все части, понимаешь их потребности, ведёшь к исцелению."
-    )
-
-    async def deliberate(
-        self,
-        context: IFSContext,
-        council_log: list[PartPosition] | None = None,
-    ) -> PartPosition:
-        """Synthesise a balanced Self response informed by council_log."""
-        text = context.text
-
-        llm_text = await self._llm_deliberate(context, council_log or [])
-
-        self_keywords = PART_SIGNALS.get("SELF", [])
-        base_conf = max(0.4, self._keyword_score(text, self_keywords) + 0.4)
-
-        if llm_text:
-            position = llm_text
-        elif council_log:
-            # Synthesise from what the other parts expressed
-            pain_parts = [
-                p.part_name
-                for p in council_log
-                if p.part_name == "Изгнанник" and p.confidence > 0.4
-            ]
-            urgent_parts = [
-                p.part_name
-                for p in council_log
-                if p.part_name == "Пожарный" and p.confidence > 0.5
-            ]
-
-            if pain_parts:
-                position = (
-                    "Я слышу боль внутри. Давай с состраданием посмотрим "
-                    "на то, что происходит, и найдём путь к исцелению."
-                )
-                base_conf = min(1.0, base_conf + 0.1)
-            elif urgent_parts:
-                position = (
-                    "Замечаю желание действовать прямо сейчас. "
-                    "Давай сделаем паузу и поймём, что действительно нужно."
-                )
-            else:
-                position = (
-                    "Я с тобой. Давай вместе разберёмся с тем, что происходит."
-                )
-        else:
-            position = (
-                "Я слышу тебя. С любопытством и состраданием смотрю на ситуацию."
-            )
-
-        return PartPosition(
-            part_name=self.name,
-            position=position,
-            confidence=min(base_conf, 1.0),
-            needs=["ясность", "исцеление", "связь"],
-            fears=[],
-        )
-
-
-# ---------------------------------------------------------------------------
-# Factory
-# ---------------------------------------------------------------------------
-
-
-def build_default_parts(
-    llm_client: "LLMClient | None" = None,
-) -> list[IFSPartAgent]:
-    """Return the default set of four IFS Part agents.
-
-    Parameters
-    ----------
-    llm_client:
-        Optional LLM client passed to each agent.  When provided, agents
-        will use the LLM to generate nuanced responses via their
-        ``voice_prompt``.
-    """
-    return [
-        CriticAgent(llm_client=llm_client),
-        FirefighterAgent(llm_client=llm_client),
-        ExileAgent(llm_client=llm_client),
-        SelfAgent(llm_client=llm_client),
+    _TRIGGERS = [
+        "подвёл", "подвела", "ненавижу себя", "снова", "опять",
+        "неудача", "провал", "недостаточно", "must", "should",
+        "надо было", "не смог", "не смогла", "облажался", "облажалась",
     ]
+
+    async def respond(
+        self,
+        context: IFSAgentContext,
+        council_voices: list[IFSAgentResult] | None = None,
+    ) -> IFSAgentResult:
+        """Voice the Critic's perspective.
+
+        In Round 2, if ``council_voices`` contains an active ExileAgent
+        position, the Critic softens to avoid piling on pain.
+        """
+        text_lower = context.text.lower()
+        activated = any(t in text_lower for t in self._TRIGGERS)
+
+        if activated:
+            # Round 2 adjustment: soften if Exile is in high-pain mode
+            if council_voices:
+                exile_active = any(
+                    v.part_role == "exile"
+                    and any(
+                        kw in v.voice.lower()
+                        for kw in ("боль", "страшно", "больно", "одинок")
+                    )
+                    for v in council_voices
+                )
+                if exile_active:
+                    return IFSAgentResult(
+                        part_role=self.role,
+                        voice=(
+                            "Вижу, что сейчас не время для критики. "
+                            "Чувствую боль и хочу её поддержать, а не осуждать."
+                        ),
+                        need="защита через принятие",
+                        recommendation="Отступить и дать пространство для исцеления.",
+                    )
+
+            voice = (
+                "Ты снова повторяешь ту же ошибку. "
+                "Мне нужно убедиться, что ты соответствуешь стандартам — "
+                "иначе всё рухнет."
+            )
+            need = "стабильность и предсказуемость"
+            rec = "Установить чёткие стандарты и систему контроля."
+        else:
+            voice = "Пока всё под контролем, продолжай двигаться по плану."
+            need = "контроль"
+            rec = "Продолжать текущий курс."
+
+        return IFSAgentResult(
+            part_role=self.role, voice=voice, need=need, recommendation=rec
+        )
+
+
+class FirefighterAgent(_BaseIFSAgent):
+    """Impulsive Firefighter / escape protector.
+
+    Activates on avoidance, overwhelm, escapism signals.
+    Goal: immediately relieve unbearable pain via distraction.
+    """
+
+    role = "firefighter"
+
+    _TRIGGERS = [
+        "залип", "избегаю", "отвлекаюсь", "прокрастинирую",
+        "ушёл", "ушла", "не могу начать", "тяжело", "невыносимо",
+        "сбежать", "игры", "соцсети", "netflix", "youtube",
+    ]
+
+    async def respond(
+        self,
+        context: IFSAgentContext,
+        council_voices: list[IFSAgentResult] | None = None,
+    ) -> IFSAgentResult:
+        """Voice the Firefighter's perspective.
+
+        In Round 2, if ``council_voices`` contains an active ExileAgent,
+        the Firefighter's urgency increases.
+        """
+        text_lower = context.text.lower()
+        activated = any(t in text_lower for t in self._TRIGGERS)
+
+        if activated:
+            # Round 2 adjustment: increase urgency when Exile is active
+            if council_voices:
+                exile_active = any(
+                    v.part_role == "exile"
+                    and any(
+                        kw in v.voice.lower()
+                        for kw in ("боль", "страшно", "больно", "одинок")
+                    )
+                    for v in council_voices
+                )
+                if exile_active:
+                    return IFSAgentResult(
+                        part_role=self.role,
+                        voice=(
+                            "Изгнанник страдает — мне нужно действовать немедленно. "
+                            "Дать ему хоть какое-то облегчение прямо сейчас!"
+                        ),
+                        need="срочное облегчение боли",
+                        recommendation="Краткосрочная разгрузка для снижения боли Изгнанника.",
+                    )
+
+            voice = (
+                "Мне нужно было дать тебе передышку прямо сейчас — "
+                "боль была слишком сильной, а ты не мог остановиться сам."
+            )
+            need = "мгновенное облегчение и отдых"
+            rec = "Дать себе короткий осознанный перерыв вместо бессознательного побега."
+        else:
+            voice = "Напряжение терпимое, в побеге пока нет нужды."
+            need = "безопасность"
+            rec = "Оставаться в контакте с задачей."
+
+        return IFSAgentResult(
+            part_role=self.role, voice=voice, need=need, recommendation=rec
+        )
+
+
+class ExileAgent(_BaseIFSAgent):
+    """Wounded Exile / inner child.
+
+    Activates on shame, loneliness, fear of rejection signals.
+    Goal: be seen, accepted, and loved.
+    """
+
+    role = "exile"
+
+    _TRIGGERS = [
+        "стыдно", "стыжусь", "одинок", "одинока", "никому не нужен",
+        "никому не нужна", "боюсь", "отвергнут", "отвергнута",
+        "не принимают", "плохой", "плохая", "недостоин", "недостойна",
+    ]
+
+    async def respond(
+        self,
+        context: IFSAgentContext,
+        council_voices: list[IFSAgentResult] | None = None,
+    ) -> IFSAgentResult:
+        """Voice the Exile's perspective.
+
+        In Round 2, if ``council_voices`` contains a dominant Critic,
+        the Exile's need for safety increases.
+        """
+        text_lower = context.text.lower()
+        activated = any(t in text_lower for t in self._TRIGGERS)
+
+        if activated:
+            # Round 2 adjustment: amplify safety need when Critic dominated
+            if council_voices:
+                critic_active = any(
+                    v.part_role == "critic"
+                    and any(
+                        kw in v.voice.lower()
+                        for kw in ("ошибку", "стандарт", "рухнет", "снова")
+                    )
+                    for v in council_voices
+                )
+                if critic_active:
+                    return IFSAgentResult(
+                        part_role=self.role,
+                        voice=(
+                            "Критик давит на меня. "
+                            "Мне нужна безопасность и принятие, а не ещё больше осуждения."
+                        ),
+                        need="безопасность и защита от критики",
+                        recommendation="Сначала создать безопасное пространство, потом работать над ошибками.",
+                    )
+
+            voice = (
+                "Мне больно и страшно. Я просто хочу, чтобы меня увидели "
+                "и приняли таким, какой я есть."
+            )
+            need = "принятие, любовь, безопасная привязанность"
+            rec = "Признать эту боль и дать ей место, не убегая и не подавляя."
+        else:
+            voice = "Сейчас я в безопасности и чувствую себя принятым."
+            need = "принятие"
+            rec = "Поддерживать ощущение безопасности."
+
+        return IFSAgentResult(
+            part_role=self.role, voice=voice, need=need, recommendation=rec
+        )
+
+
+class SelfAgent(_BaseIFSAgent):
+    """Compassionate Self / observer.
+
+    Always responds; synthesises the voices of other parts with curiosity,
+    compassion, clarity, and calmness (the 8 Cs of IFS Self-leadership).
+    """
+
+    role = "self"
+
+    async def respond(self, context: IFSAgentContext) -> IFSAgentResult:
+        mood = context.mood_context
+        label = mood.get("dominant_label") or mood.get("label") or ""
+        parts_info = context.parts_context
+
+        if label:
+            mood_note = f"Замечаю, что сейчас преобладает состояние «{label}»."
+        else:
+            mood_note = "Присутствую здесь полностью."
+
+        if parts_info:
+            part_names = [
+                p.get("subtype") or p.get("key") or "часть"
+                for p in parts_info[:2]
+            ]
+            parts_note = " Вижу активные части: " + " и ".join(part_names) + "."
+        else:
+            parts_note = ""
+
+        voice = (
+            f"{mood_note}{parts_note} "
+            "Я здесь, чтобы слышать каждую часть с состраданием "
+            "и помочь найти путь вперёд без осуждения."
+        )
+
+        return IFSAgentResult(
+            part_role=self.role,
+            voice=voice.strip(),
+            need="интеграция и исцеление",
+            recommendation=(
+                "Дать каждой части голос, признать её намерение и выбрать "
+                "осознанный ответ вместо автоматической реакции."
+            ),
+        )
