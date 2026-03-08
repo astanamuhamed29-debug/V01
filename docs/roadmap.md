@@ -37,11 +37,9 @@ values, goals, beliefs, and at least one DomainProfile.
 
 **Deliverables**:
 - [ ] `OnboardingSession` implementation — session tracking, question/answer flow
-- [ ] `DomainProfile` implementation — domain-specific identity sub-profile
-- [ ] `ProfileGap` detection — identify missing profile fields, trigger adaptive
-      interviewing
-- [ ] `IdentityProfile` aggregation — synthesise graph nodes into a unified profile
-      object
+- [x] `DomainProfile` implementation — `core/identity/schema.py`
+- [x] `ProfileGap` detection — `core/identity/builder.py` (`_detect_gaps`)
+- [x] `IdentityProfile` aggregation — `core/identity/builder.py` (`IdentityProfileBuilder`)
 - [ ] Onboarding pipeline stage — new pipeline stage or tool that initiates and
       continues onboarding for new users
 - [ ] Confidence tracking — per-field confidence scores on identity nodes
