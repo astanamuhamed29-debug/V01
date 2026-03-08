@@ -11,8 +11,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, Message
 from dotenv import load_dotenv
 
-from core.analytics.calibrator import ThresholdCalibrator
-from config import LOG_LEVEL
+from config import LOG_LEVEL, load_settings
 from core.analytics.pattern_analyzer import PatternAnalyzer
 from core.pipeline.processor import MessageProcessor
 from core.scheduler.proactive_scheduler import ProactiveScheduler
@@ -65,11 +64,17 @@ def _release_bot_instance_lock(lock_path: Path) -> None:
 
 
 def _get_bot_token() -> str:
-    load_dotenv()
-    token = os.getenv("TELEGRAM_BOT_TOKEN")
-    if not token:
+    """Return the Telegram bot token from the current environment.
+
+    :func:`load_dotenv` must have been called before this function so that
+    ``.env`` file values are already reflected in ``os.environ`` and therefore
+    visible to the module-level ``TELEGRAM_BOT_TOKEN`` constant in config.
+    Call ``load_settings()`` instead if you need a freshly resolved value.
+    """
+    settings = load_settings()
+    if not settings.telegram_bot_token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
-    return token
+    return settings.telegram_bot_token
 
 
 @router.message(Command("report"))
@@ -211,20 +216,25 @@ async def handle_feedback_callback(call: CallbackQuery, processor: MessageProces
 
 async def run_bot() -> None:
     token = _get_bot_token()
+    settings = load_settings()
+    logger.info(settings.startup_summary())
+
     bot = Bot(token=token)
     processor = build_processor()
-    if not hasattr(processor, "pattern_analyzer"):
+
+    # pattern_analyzer and calibrator are already built inside build_processor();
+    # we only create a fallback PatternAnalyzer if an older factory omitted it.
+    if not hasattr(processor, "pattern_analyzer") or processor.pattern_analyzer is None:
         processor.pattern_analyzer = PatternAnalyzer(
             processor.graph_api.storage,
             embedding_service=getattr(processor, "embedding_service", None),
         )
-    calibrator = ThresholdCalibrator(processor.graph_api.storage)
-    processor.calibrator = calibrator
+
     scheduler = ProactiveScheduler(
         bot=bot,
         storage=processor.graph_api.storage,
         analyzer=processor.pattern_analyzer,
-        calibrator=calibrator,
+        calibrator=processor.calibrator,
     )
     dispatcher = Dispatcher()
     dispatcher["processor"] = processor
@@ -241,6 +251,7 @@ async def run_bot() -> None:
 
 
 def main() -> None:
+    load_dotenv()  # pick up .env before config values are re-read
     logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO))
     lock_path: Path | None = None
     try:
