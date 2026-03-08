@@ -261,7 +261,7 @@ async def handle_incoming_message(message: Message, processor) -> None:
     user_id = str(message.from_user.id)
     try:
         logger.info("Telegram message received from user=%s", user_id)
-        result = await processor.process(
+        result = await processor.process_message(
             user_id,
             message.text,
             source="telegram",

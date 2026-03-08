@@ -21,7 +21,7 @@ class GraphContextBuilder:
 
     async def build(self, user_id: str) -> dict:
         """
-        Собирает контекст из графа для использования в generate_reply.
+        Собирает контекст из графа для использования в render_template_reply / ACT stage.
         Возвращает словарь с историческими паттернами пользователя.
         """
         projects_raw = await self.storage.find_nodes(user_id, node_type="PROJECT", limit=10)
