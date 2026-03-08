@@ -1,12 +1,12 @@
 """MotivationStateBuilder for SELF-OS.
 
 Constructs a :class:`~core.motivation.schema.MotivationState` from the
-current system data.  This is the v0 placeholder implementation: it pulls
-from available subsystems where possible and degrades gracefully when
-dependencies are not available.
+current system data.  Dependencies are all optional; the builder degrades
+gracefully when subsystems are not available and always returns a valid
+:class:`~core.motivation.schema.MotivationState`.
 
-Future versions will integrate value-tension detection, need-to-goal linkage,
-and action-readiness scoring based on the full IdentityProfile.
+The builder orchestrates data collection and delegates scoring to
+:class:`~core.motivation.scoring.MotivationScorer`.
 """
 
 from __future__ import annotations
@@ -15,12 +15,15 @@ import logging
 from typing import TYPE_CHECKING
 
 from core.motivation.schema import MotivationState
+from core.motivation.scoring import MotivationScorer
 
 if TYPE_CHECKING:
     from core.goals.engine import GoalEngine
     from core.psyche.state import PsycheState
 
 logger = logging.getLogger(__name__)
+
+_scorer = MotivationScorer()
 
 
 class MotivationStateBuilder:
@@ -72,10 +75,12 @@ class MotivationStateBuilder:
         active_goals: list[str] = []
         unresolved_needs: list[str] = []
         dominant_emotions: list[str] = []
-        priority_signals: list[str] = []
         constraints: list[str] = []
         evidence_refs: list[str] = []
         confidence_parts: list[float] = []
+        stressor_tags: list[str] = []
+        emotional_pressure: float = 0.0
+        constraint_penalty: float = 0.0
 
         # ---- Goals -------------------------------------------------------
         if self._goal_engine is not None:
@@ -98,9 +103,10 @@ class MotivationStateBuilder:
         # ---- PsycheState -------------------------------------------------
         if psyche_state is not None:
             # Unresolved needs
-            if psyche_state.dominant_need:
-                unresolved_needs.append(psyche_state.dominant_need)
-                evidence_refs.append(f"psyche_state:dominant_need:{psyche_state.dominant_need}")
+            dominant_need = getattr(psyche_state, "dominant_need", None)
+            if dominant_need:
+                unresolved_needs.append(dominant_need)
+                evidence_refs.append(f"psyche_state:dominant_need:{dominant_need}")
 
             # Dominant emotions (from emotion label or mood vector)
             dominant_label = getattr(psyche_state, "dominant_label", "")
@@ -108,26 +114,48 @@ class MotivationStateBuilder:
                 dominant_emotions.append(dominant_label)
                 evidence_refs.append(f"psyche_state:dominant_label:{dominant_label}")
 
-            # Stressor tags as priority signals
-            stressor_tags: list[str] = getattr(psyche_state, "stressor_tags", []) or []
-            for tag in stressor_tags:
-                priority_signals.append(f"stressor: {tag}")
+            # Stressor tags
+            stressor_tags = list(getattr(psyche_state, "stressor_tags", []) or [])
+
+            # Emotional pressure proxy: high arousal signals urgency
+            arousal: float = getattr(psyche_state, "arousal", 0.0) or 0.0
+            valence: float = getattr(psyche_state, "valence", 0.0) or 0.0
+            # Negative valence with high arousal = distress = high pressure
+            emotional_pressure = max(0.0, min(1.0, abs(arousal) * 0.5 + max(0.0, -valence) * 0.5))
 
             # Cognitive load constraint
             cognitive_load: float = getattr(psyche_state, "cognitive_load", 0.0) or 0.0
             if cognitive_load > 0.7:
                 constraints.append("high cognitive load — prefer low-effort actions")
+                constraint_penalty = cognitive_load * 0.4
 
             confidence_parts.append(0.9)
         else:
             confidence_parts.append(0.1)
 
-        # ---- Action readiness --------------------------------------------
-        action_readiness = _compute_action_readiness(psyche_state)
+        # ---- Scoring -----------------------------------------------------
+        action_readiness = _scorer.compute_action_readiness(
+            goal_count=len(active_goals),
+            need_count=len(unresolved_needs),
+            emotional_pressure=emotional_pressure,
+            constraint_penalty=constraint_penalty,
+        )
 
-        # ---- Priority signals from goals ---------------------------------
-        for goal in active_goals:
-            priority_signals.append(f"active goal: {goal}")
+        priority_signals = (
+            _scorer.build_goal_signals(active_goals)
+            + _scorer.build_need_signals(unresolved_needs)
+            + _scorer.build_emotion_signals(dominant_emotions, emotional_pressure)
+            + _scorer.build_stressor_signals(stressor_tags)
+        )
+        priority_signals.sort(key=lambda s: s.score, reverse=True)
+
+        recommended_next_actions = _scorer.build_recommended_actions(
+            goals=active_goals,
+            needs=unresolved_needs,
+            dominant_emotions=dominant_emotions,
+            action_readiness=action_readiness,
+            constraints=constraints,
+        )
 
         # ---- Overall confidence ------------------------------------------
         confidence = sum(confidence_parts) / len(confidence_parts) if confidence_parts else 0.2
@@ -137,33 +165,11 @@ class MotivationStateBuilder:
             active_goals=active_goals,
             unresolved_needs=unresolved_needs,
             dominant_emotions=dominant_emotions,
-            value_tensions=[],  # v0: not yet implemented
+            value_tensions=[],  # v1: not yet implemented
             priority_signals=priority_signals,
             action_readiness=action_readiness,
-            recommended_next_actions=[],  # v0: not yet implemented
+            recommended_next_actions=recommended_next_actions,
             constraints=constraints,
             evidence_refs=evidence_refs,
             confidence=round(confidence, 3),
         )
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _compute_action_readiness(psyche_state: PsycheState | None) -> float:
-    """Estimate action readiness from PsycheState.
-
-    Returns a value in [0, 1].  Falls back to 0.5 when no state is available.
-    """
-    if psyche_state is None:
-        return 0.5
-
-    arousal: float = getattr(psyche_state, "arousal", 0.0) or 0.0
-    cognitive_load: float = getattr(psyche_state, "cognitive_load", 0.0) or 0.0
-
-    # High arousal + low cognitive load → high readiness.
-    # High cognitive load → reduced readiness.
-    readiness = 0.5 + 0.3 * arousal - 0.4 * cognitive_load
-    return max(0.0, min(1.0, round(readiness, 3)))
