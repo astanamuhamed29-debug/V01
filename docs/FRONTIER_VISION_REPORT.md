@@ -1,5 +1,12 @@
 # FRONTIER VISION REPORT — SELF-OS Stage 1 → Stage 5
 
+> **🔬 DESIGN EXPLORATION DOCUMENT** — This is a deep technical research document
+> written in Russian, exploring the Stage 1→5 cognitive architecture evolution.
+> It is a design reference for future roadmap directions, not a specification of
+> current implemented behaviour. See [docs/architecture.md](architecture.md) for
+> the canonical current architecture and [docs/roadmap.md](roadmap.md) for the
+> current development roadmap.
+
 > **Статус:** Архитектурный аудит · Февраль 2026  
 > **Роль:** Principal AI Architect / Chief Science Officer  
 > **Цель:** Спроектировать эволюцию SELF-OS от пассивного парсера дневников до автономной прогностической когнитивной системы (Stage 5).

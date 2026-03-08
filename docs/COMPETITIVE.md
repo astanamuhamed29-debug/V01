@@ -1,5 +1,10 @@
 # SELF-OS — Competitive Analysis
 
+> **📋 PRODUCT REFERENCE DOCUMENT** — This is a strategic market analysis document,
+> not a technical specification. It provides competitive context for product and
+> positioning decisions. See [docs/product-positioning.md](product-positioning.md) for
+> the canonical product positioning document.
+
 > How SELF-OS compares to the landscape, where the gaps are, and why the identity layer is defensible.
 
 ---
