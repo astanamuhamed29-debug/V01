@@ -297,6 +297,8 @@ V01/
 
 ## Documentation
 
+**Canonical documents** (current source of truth):
+
 | Document | Description |
 |---|---|
 | [docs/vision.md](docs/vision.md) | Long-term vision, core thesis, Engine→Protocol progression |
@@ -306,10 +308,15 @@ V01/
 | [docs/roadmap.md](docs/roadmap.md) | Ordered development roadmap (Phases 1–8) |
 | [docs/onboarding-and-identity-bootstrap.md](docs/onboarding-and-identity-bootstrap.md) | Onboarding design and identity acquisition |
 | [docs/retrieval-strategy.md](docs/retrieval-strategy.md) | Identity-aware retrieval design |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Legacy detailed architecture reference |
-| [docs/VISION.md](docs/VISION.md) | Legacy product vision document |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | Legacy stage-based technical roadmap |
 | [deploy/VPS_DEPLOY.md](deploy/VPS_DEPLOY.md) | Production VPS deployment guide |
+
+**Legacy documents** (retained for historical reference — each file contains a notice pointing to its canonical replacement):
+
+| Document | Description |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Legacy detailed architecture reference → superseded by [docs/architecture.md](docs/architecture.md) |
+| [docs/VISION.md](docs/VISION.md) | Legacy product vision document → superseded by [docs/vision.md](docs/vision.md) |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Legacy stage-based technical roadmap → superseded by [docs/roadmap.md](docs/roadmap.md) |
 
 ---
 
