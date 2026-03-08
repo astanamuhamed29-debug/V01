@@ -1,3 +1,9 @@
+> **⚠️ LEGACY DOCUMENT — retained for historical reference only.**
+> The canonical vision document is **[docs/vision.md](vision.md)**. New contributors should read that document instead.
+> Content here represents an earlier product-vision draft and is preserved for context.
+
+---
+
 # SELF-OS — Product Vision
 
 > *"Your AI that actually knows you — so it can act as you."*

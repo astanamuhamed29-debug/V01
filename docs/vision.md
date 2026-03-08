@@ -85,7 +85,7 @@ Engine  →  Product  →  Platform  →  Protocol
 
 - **Engine**: The core memory, emotional, identity, and motivation subsystems.
 - **Product**: A user-facing agent (initially Telegram-based) that delivers value day-to-day.
-- **Platform**: An extensible layer that other tools (Obsidian, calendar, task managers) can integrate with.
+- **Platform**: A native workspace that replaces external PKM tools (notes, tasks, knowledge management) — SELF-OS is the Notion/Obsidian of the future, powered by identity awareness. Other tools may integrate *with* SELF-OS, not the other way around.
 - **Protocol**: A public, standards-based interface for identity and memory that third-party systems can consume.
 
 Building in this order ensures that each layer is validated by real use before being

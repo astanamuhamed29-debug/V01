@@ -1,3 +1,9 @@
+> **⚠️ LEGACY DOCUMENT — retained for historical reference only.**
+> The canonical roadmap is **[docs/roadmap.md](roadmap.md)**. New contributors should read that document instead.
+> The Stage 1–5 model here provides useful implementation history. The phase-based roadmap in [docs/roadmap.md](roadmap.md) supersedes this document for current direction.
+
+---
+
 # SELF-OS — Technical Roadmap
 
 > Living document tracking what's built, what's in progress, and what's planned.

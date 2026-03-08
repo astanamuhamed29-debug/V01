@@ -25,9 +25,10 @@ It is:
 - **Not a chatbot.** Although SELF-OS communicates through a conversational interface,
   its purpose is not to chat — it is to build a persistent model of the user and act
   from that model.
-- **Not a note-taking app.** Although SELF-OS will integrate with note systems (e.g.
-  Obsidian), it is not a replacement for them. It is a layer that understands what the
-  notes mean.
+- **Not a note-taking or task-management app in the traditional sense.** SELF-OS is not
+  Obsidian, Notion, or Todoist. It does not require users to manually organise notes,
+  create tasks, or maintain a PKM system. Instead, the proactive agent captures, organises,
+  and acts on everything automatically — making those tools unnecessary, not complementary.
 - **Not a therapy tool.** Although SELF-OS uses therapy-adjacent models (IFS, CBT, ACT)
   to understand emotional and psychological patterns, it does not provide clinical
   treatment or diagnosis.
@@ -60,8 +61,10 @@ Supporting messages:
 ## Likely Initial Market Direction
 
 **Primary audience**: Knowledge workers, founders, and high-agency individuals who
-already use personal knowledge management tools (Notion, Obsidian, Roam) and are
-frustrated by the lack of genuine personalisation in AI assistants.
+currently use personal knowledge management tools (Notion, Obsidian, Roam, Todoist)
+and are frustrated by the fragmentation, manual maintenance, and lack of genuine
+personalisation. These users are the natural first adopters — and the natural first
+converts, as SELF-OS replaces those tools entirely.
 
 These users:
 - Have a lot of information they want to organise and act on.

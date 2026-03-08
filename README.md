@@ -49,7 +49,7 @@ SELF-OS is evolving from a sophisticated memory layer into a full
 - **Identity modeling** — explicit values, beliefs, needs, goals, and parts
 - **Motivation-driven proactive agent** — acts from accumulated context, not just queries
 - **Onboarding / identity bootstrapping** — structured first-session identity acquisition
-- **Note/Obsidian integration** — planned enrichment from the user's knowledge base
+- **Native PKM workspace** — notes, tasks, and knowledge captured and organised by the agent natively; no third-party tools needed
 - **Protocol-ready external interfaces** — long-term: consent-gated identity API
 
 The development progression is: **Engine → Product → Platform → Protocol**.
@@ -113,7 +113,7 @@ flows, and architectural rules.
 | Value tension detection | Phase 3 |
 | Identity-aware retrieval scoring | Phase 4 |
 | Goal progress tracking | Phase 5 |
-| Obsidian integration | Phase 7 |
+| Native PKM workspace (notes, tasks, knowledge — replaces Notion/Obsidian/Todoist) | Phase 7 |
 | Protocol-ready public API | Phase 8 |
 
 See [docs/roadmap.md](docs/roadmap.md) for the full ordered roadmap.
@@ -297,6 +297,8 @@ V01/
 
 ## Documentation
 
+**Canonical documents** (current source of truth):
+
 | Document | Description |
 |---|---|
 | [docs/vision.md](docs/vision.md) | Long-term vision, core thesis, Engine→Protocol progression |
@@ -306,10 +308,15 @@ V01/
 | [docs/roadmap.md](docs/roadmap.md) | Ordered development roadmap (Phases 1–8) |
 | [docs/onboarding-and-identity-bootstrap.md](docs/onboarding-and-identity-bootstrap.md) | Onboarding design and identity acquisition |
 | [docs/retrieval-strategy.md](docs/retrieval-strategy.md) | Identity-aware retrieval design |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Legacy detailed architecture reference |
-| [docs/VISION.md](docs/VISION.md) | Legacy product vision document |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | Legacy stage-based technical roadmap |
 | [deploy/VPS_DEPLOY.md](deploy/VPS_DEPLOY.md) | Production VPS deployment guide |
+
+**Legacy documents** (retained for historical reference — each file contains a notice pointing to its canonical replacement):
+
+| Document | Description |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Legacy detailed architecture reference → superseded by [docs/architecture.md](docs/architecture.md) |
+| [docs/VISION.md](docs/VISION.md) | Legacy product vision document → superseded by [docs/vision.md](docs/vision.md) |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Legacy stage-based technical roadmap → superseded by [docs/roadmap.md](docs/roadmap.md) |
 
 ---
 

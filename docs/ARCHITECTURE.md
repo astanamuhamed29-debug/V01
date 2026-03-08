@@ -1,3 +1,9 @@
+> **⚠️ LEGACY DOCUMENT — retained for historical reference only.**
+> The canonical architecture document is **[docs/architecture.md](architecture.md)**. New contributors should read that document instead.
+> The detailed per-module notes here remain accurate, but the layered system design and data-flow diagrams in [docs/architecture.md](architecture.md) supersede this document.
+
+---
+
 # SELF-OS Architecture
 
 > Stage 1 — Knowledge Graph Core (Complete)

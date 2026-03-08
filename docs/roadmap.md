@@ -130,21 +130,35 @@ early external users.
 
 ---
 
-## Phase 7 — External Integration Layer
+## Phase 7 — Native Workspace Layer
 
-**Goal**: Enable SELF-OS to read from and write to external tools (Obsidian, calendar,
-task managers) so that the agent's knowledge is continuously enriched by the user's
-digital life.
+**Goal**: Build SELF-OS's own analogs to Notion, Obsidian, and task managers — natively,
+inside the system. SELF-OS does not integrate with these third-party tools: it **replaces**
+them. The proactive agent creates tasks, organises notes, and maintains knowledge graphs
+on behalf of the user. There is no need for external PKM tools when the agent handles
+everything intelligently from accumulated identity context.
+
+**Strategic principle**: A user should never need to open Obsidian or Notion because
+SELF-OS does everything they do — and does it better, because it understands *who the
+user is* and acts accordingly. Task creation, note capture, project organisation, and
+knowledge management all happen natively inside SELF-OS, driven by the agent rather than
+by manual user effort.
 
 **Deliverables**:
-- [ ] Obsidian integration — import notes as graph nodes; write insights back as notes
-- [ ] Calendar integration — read upcoming events; surface relevant context proactively
-- [ ] Task manager integration — sync tasks from external tools (Todoist, Linear, etc.)
+- [ ] Native note layer — zero-friction capture; AI automatically structures input into
+      the knowledge graph (replaces Obsidian/Notion note-taking)
+- [ ] Agent-driven task creation — the proactive agent generates, prioritises, and manages
+      tasks from goal context; users do not manually enter tasks into a separate tool
+      (replaces Todoist/Linear/Things)
+- [ ] Native knowledge workspace — daily/weekly review summaries, emergent topic clusters,
+      atomic note views — all auto-generated from the graph (replaces PKM tools)
+- [ ] Calendar ingestion — read calendar events as context signals only (no write-back
+      needed; the agent plans, not external calendars)
 - [ ] Web search tool — allow agent to search the web and add results to memory
 - [ ] Webhook ingestion — accept events from external systems via HTTP
 
-**Dependencies**: Phase 6 (stable product surface), existing ObsidianTool and
-WebSearchTool stubs.
+**Dependencies**: Phase 6 (stable product surface), Phases 3–5 (proactive agent and
+goal continuity).
 
 ---
 
@@ -162,7 +176,7 @@ external applications to query a user's identity and context with their consent.
 - [ ] SDK or client library (Python, TypeScript)
 - [ ] Protocol specification — formal definition of the identity and memory query API
 
-**Dependencies**: Phase 7 (stable external integration layer).
+**Dependencies**: Phase 7 (stable native workspace layer).
 
 ---
 
