@@ -18,8 +18,8 @@ import, or an inferred insight.
 **Fields**: `id`, `user_id`, `timestamp`, `content`, `node_type`, `tags`, `source`,
 `embedding`, `abstraction_level`, `confidence`, `relationship_refs`
 
-**Graph representation**: A typed node in the knowledge graph. Node type may be EVENT,
-INSIGHT, MEMORY, CONCEPT, or others. Relationships connect it to related nodes (people,
+**Graph representation**: A typed node in the knowledge graph. Node type is typically
+EVENT, NOTE, INSIGHT, or THOUGHT. Relationships connect it to related nodes (people,
 topics, emotions, goals).
 
 **Implementation**: `core/graph/storage.py`, `core/graph/api.py`
@@ -282,7 +282,7 @@ objects are computed from it and should not be stored as separate authoritative 
 
 | Domain Object | Graph Node Type |
 |---|---|
-| MemoryEvent | EVENT, MEMORY, CONCEPT, OBSERVATION |
+| MemoryEvent | EVENT, NOTE, INSIGHT, THOUGHT |
 | Need | NEED |
 | Belief | BELIEF |
 | Value | VALUE |

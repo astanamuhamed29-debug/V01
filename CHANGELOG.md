@@ -6,6 +6,32 @@ Format: `[vX.Y.Z — Title] (date)` followed by categorised changes.
 
 ---
 
+## v0.3.1 — Architectural Clarity (2026-03-08)
+
+### Documentation
+
+- **Doc #1**: `.env.example` expanded — all `config.py` environment variables are
+  now present, commented, and grouped (LLM, Interface, Storage, Logging, Neo4j,
+  Qdrant). Previously only 5 variables were listed; optional variables are included
+  as commented-out examples.
+- **Doc #2**: `deploy/.env.vps.example` aligned with `.env.example` — same
+  groupings and optional variables added.
+- **Doc #3**: `docs/adr/` directory created with ADR index (`README.md`) and three
+  foundational ADRs:
+  - `001-layered-architecture.md` — documents the downward-only dependency rule
+  - `002-sqlite-as-primary-store.md` — documents the SQLite + optional Neo4j/Qdrant
+    storage decision
+  - `003-psychestate-as-universal-state-contract.md` — documents PsycheState as the
+    universal agent state object
+- **Doc #4**: `CONTRIBUTING.md` created — contribution workflow, code standards,
+  testing requirements, ADR guidance, commit/PR conventions.
+- **Doc #5** (`docs/domain-model.md`): Fixed Node Type Mapping table — removed
+  non-existent node types MEMORY, CONCEPT, OBSERVATION; replaced with the canonical
+  types that `NodeType` actually defines (EVENT, NOTE, INSIGHT, THOUGHT). Also
+  corrected the MemoryEvent graph-representation sentence.
+
+---
+
 ## v0.3.0 — Stage 3 Stabilization (2026-03-04)
 
 ### New Modules
