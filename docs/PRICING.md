@@ -1,5 +1,10 @@
 # SELF-OS — Pricing Strategy
 
+> **📋 PRODUCT REFERENCE DOCUMENT** — This is a strategic pricing and positioning
+> document, not a technical specification. It informs commercial decisions. See
+> [docs/product-positioning.md](product-positioning.md) for the canonical product
+> positioning document.
+
 > Positioning SELF-OS as a premium Personal Intelligence OS, not a commodity task manager or therapy app.
 
 ---

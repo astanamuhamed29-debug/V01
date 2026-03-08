@@ -29,67 +29,82 @@ accurately reflects the current codebase and clearly defines the target directio
 
 ---
 
-## Phase 2 — Identity Bootstrapping / Onboarding
+## Phase 2 — Identity Bootstrapping / Onboarding ✅
 
 **Goal**: Implement a structured onboarding flow that acquires an initial identity model
 from a new user. After onboarding, the system has a populated IdentityProfile with
 values, goals, beliefs, and at least one DomainProfile.
 
 **Deliverables**:
-- [ ] `OnboardingSession` implementation — session tracking, question/answer flow
 - [x] `DomainProfile` implementation — `core/identity/schema.py`
 - [x] `ProfileGap` detection — `core/identity/builder.py` (`_detect_gaps`)
 - [x] `IdentityProfile` aggregation — `core/identity/builder.py` (`IdentityProfileBuilder`)
-- [ ] Onboarding pipeline stage — new pipeline stage or tool that initiates and
-      continues onboarding for new users
+- [x] `OnboardingPlanner` — `core/onboarding/planner.py` (gap-driven question generation)
+- [x] `OnboardingQuestion` / `OnboardingAnswer` schema — `core/onboarding/schema.py`
+- [ ] Onboarding pipeline stage — dedicated pipeline stage for guided first-session flow
 - [ ] Confidence tracking — per-field confidence scores on identity nodes
-- [ ] Graph population — onboarding answers create VALUE, BELIEF, NEED, GOAL nodes
+- [ ] Graph population — onboarding answers create VALUE, BELIEF, NEED nodes in graph
+
+**Current status**: Core identity model and onboarding planner complete. Pipeline
+integration and graph write-back from onboarding answers remain.
 
 **Dependencies**: Phase 1 (documentation), existing graph layer.
 
-See [docs/onboarding-and-identity-bootstrap.md](onboarding-and-identity-bootstrap.md).
+See [docs/onboarding-and-identity-bootstrap.md](onboarding-and-identity-bootstrap.md)
+and [docs/onboarding-flow.md](onboarding-flow.md).
 
 ---
 
-## Phase 3 — Motivation Core
+## Phase 3 — Motivation Core ✅
 
 **Goal**: Implement a working MotivationState that synthesises current identity, goals,
 emotional state, and needs into actionable priority signals. Use it to drive proactive
 agent behaviour.
 
 **Deliverables**:
-- [ ] `MotivationStateBuilder` — full implementation (replace v0 placeholder)
-- [ ] Value tension detection — identify conflicts between active goals and core values
-- [ ] Need-to-goal linkage — connect unresolved needs to goal suggestions
-- [ ] Action readiness score — estimate user's current capacity for action
-- [ ] Proactive action generation — agent proposes actions from MotivationState
-- [ ] AgentAction persistence — write AgentAction records to storage
-- [ ] Motivation history — store MotivationState snapshots over time
+- [x] `MotivationStateBuilder` — `core/motivation/builder.py` (full implementation)
+- [x] `MotivationScorer` — `core/motivation/scoring.py` (rule-based, stateless)
+- [x] Action readiness score — computed from goals, needs, emotional pressure
+- [x] `RecommendedAction` generation — ordered priority actions from PsycheState
+- [x] `AgentAction` schema + persistence — `core/agent/schema.py` + `core/agent/store.py`
+- [x] `MotivationStateStore` — snapshot persistence in `core/motivation/schema.py`
+- [ ] Value tension detection — conflicts between active goals and core values (v1)
+- [ ] Need-to-goal linkage — suggest goals from unresolved needs
+
+**Current status**: MotivationStateBuilder and AgentAction persistence complete.
+Value tension detection is a planned v1 extension.
 
 **Dependencies**: Phase 2 (populated identity model), existing PsycheState.
 
+See [docs/motivation-engine.md](motivation-engine.md) and
+[docs/proactive-loop.md](proactive-loop.md).
+
 ---
 
-## Phase 4 — Identity-Aware Retrieval
+## Phase 4 — Identity-Aware Retrieval ✅
 
 **Goal**: Replace purely similarity-based retrieval with identity-aware retrieval that
 weights results by relevance to the user's current identity, goals, emotional state, and
 values.
 
 **Deliverables**:
-- [ ] Identity relevance scorer — weight retrieved nodes by relevance to active goals
-      and dominant needs
-- [ ] Emotional salience scorer — boost nodes that are emotionally resonant with the
-      current VAD state
-- [ ] Confidence-weighted retrieval — down-weight low-confidence nodes
-- [ ] Goal-aware retrieval — prioritise nodes linked to active goals
-- [ ] Retrieval context selector — choose retrieval strategy based on usage context
-      (chat / planning / proactive / reflection)
-- [ ] Updated RAG layer — integrate new scoring into retrieval pipeline
+- [x] `RetrievalScorer` — 7-dimensional weighted scoring (`core/retrieval/scoring.py`)
+- [x] Identity relevance dimension — weights nodes linked to values and active needs
+- [x] Emotional salience dimension — boosts emotionally resonant nodes
+- [x] Confidence-weighted retrieval — down-weights low-confidence nodes
+- [x] Goal relevance dimension — prioritises nodes linked to active goals
+- [x] `RetrievalRanker` — filter, sort, cap pipeline (`core/retrieval/ranker.py`)
+- [x] `RetrievalQueryContext` with `query_type` — context-aware retrieval modes
+- [ ] Per-mode weight profiles — mode-specific weight presets (chat/planning/proactive)
+- [ ] Updated RAG layer — integrate `RetrievalScorer` into the `core/rag/` pipeline
+
+**Current status**: Scoring and ranking layer complete. Per-mode weight profiles and
+full RAG integration remain for v1.
 
 **Dependencies**: Phase 2 (identity model), Phase 3 (MotivationState).
 
-See [docs/retrieval-strategy.md](retrieval-strategy.md).
+See [docs/retrieval-strategy.md](retrieval-strategy.md) and
+[docs/retrieval-architecture.md](retrieval-architecture.md).
 
 ---
 
@@ -187,8 +202,8 @@ For historical reference, the earlier development stages were:
 - **Stage 1** ✅ Passive Knowledge Graph — basic graph ingestion, keyword search
 - **Stage 2** ✅ Consolidating Memory — memory lifecycle, vector search, RAG
 - **Stage 3** ✅ Society of Mind — IFS InnerCouncil, PsycheState, GoalEngine, tools
-- **Stage 4** 🔜 Personal Intelligence OS — PredictiveEngine, NeuroCore, full pipeline
+- **Stage 4** ✅ Personal Intelligence OS — PredictiveEngine, NeuroCore, IdentityProfile, OnboardingPlanner, MotivationState, identity-aware retrieval (Phases 1–4 of this roadmap)
 - **Stage 5** 🔮 Therapeutic Self — TherapyPlanner, InterventionSelector, epistemic model
 
-The roadmap above supersedes and extends the stage model. Phases 1–4 correspond broadly
-to Stage 4; Phases 5–8 represent new directions beyond the existing stage model.
+The roadmap above supersedes and extends the stage model. Phases 5–8 represent new
+directions beyond the existing stage model.

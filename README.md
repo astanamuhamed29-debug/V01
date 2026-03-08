@@ -3,7 +3,7 @@
 > **Your AI that actually knows you.** Every conversation builds a deeper model of who
 > you are — your values, goals, needs, and emotions — remembered across every session.
 
-**Current Status: Stage 3 Complete / Architecture Alignment in Progress**
+**Current Status: Stage 4 Active — Identity, Onboarding, Retrieval, and Motivation layers complete**
 
 ---
 
@@ -98,20 +98,17 @@ flows, and architectural rules.
 | Therapy / intervention selection | `core/therapy/` | ✅ Complete |
 | Background scheduling | `core/scheduler/` | ✅ Complete |
 | Telegram interface | `interfaces/` | ✅ Complete |
-| MotivationState schema | `core/motivation/` | 🔜 Initial scaffolding |
-| AgentAction schema | `core/agent/` | 🔜 Initial scaffolding |
-| Identity bootstrapping / onboarding | planned | 🔜 Next phase |
-| Identity-aware retrieval | planned | 🔜 Phase 4 |
+| MotivationState schema + builder | `core/motivation/` | ✅ Complete |
+| AgentAction schema + persistence | `core/agent/` | ✅ Complete |
+| Identity profile + bootstrapping | `core/identity/`, `core/onboarding/` | ✅ Complete |
+| Identity-aware retrieval scoring | `core/retrieval/` | ✅ Complete |
 
 ## Planned Capabilities
 
 | Capability | Phase |
 |---|---|
-| Structured onboarding flow | Phase 2 |
-| IdentityProfile aggregation | Phase 2 |
-| Full MotivationState builder | Phase 3 |
-| Value tension detection | Phase 3 |
-| Identity-aware retrieval scoring | Phase 4 |
+| Value tension detection | Phase 4 |
+| Per-mode retrieval weight profiles | Phase 4 |
 | Goal progress tracking | Phase 5 |
 | Native PKM workspace (notes, tasks, knowledge — replaces Notion/Obsidian/Todoist) | Phase 7 |
 | Protocol-ready public API | Phase 8 |
@@ -231,23 +228,26 @@ V01/
 ├── config.py                     # Environment-based configuration
 ├── main.py                       # CLI entry point
 ├── core/                         # Core engine (all business logic)
-│   ├── agent/                    # AgentAction schema (new)
+│   ├── agent/                    # AgentAction schema + persistence
 │   ├── analytics/                # Graph analytics & cognitive detection
 │   ├── context/                  # Context management
 │   ├── goals/                    # Goal engine
 │   ├── graph/                    # Knowledge graph layer
+│   ├── identity/                 # IdentityProfile + IdentityProfileBuilder
 │   ├── insights/                 # Rule-based insight generation
 │   ├── journal/                  # Raw message archival
 │   ├── llm/                      # LLM integration
 │   ├── memory/                   # Memory lifecycle management
 │   ├── mood/                     # VAD mood tracking
-│   ├── motivation/               # MotivationState schema + builder (new)
+│   ├── motivation/               # MotivationState schema + builder
 │   ├── neuro/                    # NeuroCore neural modeling
+│   ├── onboarding/               # OnboardingPlanner + gap-driven interviews
 │   ├── parts/                    # IFS parts memory
 │   ├── pipeline/                 # OODA pipeline stages
 │   ├── prediction/               # PredictiveEngine (EWMA)
 │   ├── psyche/                   # PsycheState (unified snapshot)
 │   ├── rag/                      # Retrieval-augmented generation
+│   ├── retrieval/                # Identity-aware retrieval scoring + ranking
 │   ├── scheduler/                # Background job scheduling
 │   ├── search/                   # Hybrid vector + keyword search
 │   ├── therapy/                  # Intervention selection (CBT/ACT/IFS)
@@ -268,6 +268,7 @@ V01/
 
 | Type | Description |
 |---|---|
+| `NOTE` | Free-form note or thought fragment |
 | `EMOTION` | Emotional state (VAD model) |
 | `BELIEF` | Core belief or conviction |
 | `NEED` | Psychological need |
@@ -275,10 +276,15 @@ V01/
 | `PART` | IFS sub-personality |
 | `PROJECT` | Active project |
 | `TASK` | Action item |
-| `GOAL` | Long-term objective |
 | `EVENT` | Life event |
 | `INSIGHT` | Generated insight |
 | `PERSON` | Person mention |
+| `THOUGHT` | Reflective or analytical thought |
+| `SOMA` | Somatic / body-based sensation |
+
+> **Note:** Goals are **not** graph nodes. Long-term objectives are stored
+> separately by `GoalEngine` (`core/goals/`) in the `goals` table and
+> referenced from graph nodes via `evidence_refs`.
 
 ---
 
@@ -309,6 +315,25 @@ V01/
 | [docs/onboarding-and-identity-bootstrap.md](docs/onboarding-and-identity-bootstrap.md) | Onboarding design and identity acquisition |
 | [docs/retrieval-strategy.md](docs/retrieval-strategy.md) | Identity-aware retrieval design |
 | [deploy/VPS_DEPLOY.md](deploy/VPS_DEPLOY.md) | Production VPS deployment guide |
+
+**Design documents** (subsystem-level detail for implemented components):
+
+| Document | Description |
+|---|---|
+| [docs/identity-profile.md](docs/identity-profile.md) | IdentityProfile structure, entities, builder, and consumers |
+| [docs/onboarding-flow.md](docs/onboarding-flow.md) | Domain-based onboarding flow, gap detection, confidence tracking |
+| [docs/motivation-engine.md](docs/motivation-engine.md) | MotivationState, MotivationStateBuilder, MotivationScorer design |
+| [docs/proactive-loop.md](docs/proactive-loop.md) | v0 proactive loop design and MotivationState integration |
+| [docs/retrieval-architecture.md](docs/retrieval-architecture.md) | Retrieval pipeline (scorer, ranker, modes) and long-term direction |
+| [docs/scoring-model.md](docs/scoring-model.md) | Seven-dimension retrieval scoring model, weights, and rationale |
+
+**Product and reference documents** (strategic and market context):
+
+| Document | Description |
+|---|---|
+| [docs/COMPETITIVE.md](docs/COMPETITIVE.md) | Competitive landscape analysis and positioning |
+| [docs/PRICING.md](docs/PRICING.md) | Pricing strategy and product tier design |
+| [docs/FRONTIER_VISION_REPORT.md](docs/FRONTIER_VISION_REPORT.md) | Technical design exploration: Stage 1→5 cognitive architecture (Russian) |
 
 **Legacy documents** (retained for historical reference — each file contains a notice pointing to its canonical replacement):
 

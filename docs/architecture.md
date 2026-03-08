@@ -33,10 +33,15 @@ onboarding, guided interviewing, and inference. This layer transforms raw input 
 to onboarding questions, imported notes, biographical summaries) into populated graph
 nodes (values, beliefs, needs, domain profiles) and an initial IdentityProfile.
 
-**Current status**: Partially implemented. Graph ingestion exists. Structured onboarding
-flow is planned (see [docs/onboarding-and-identity-bootstrap.md](onboarding-and-identity-bootstrap.md)).
+**Current status**: Complete. `IdentityProfileBuilder` builds a populated `IdentityProfile`
+from graph nodes. `OnboardingPlanner` generates gap-driven interview questions.
+See [docs/onboarding-and-identity-bootstrap.md](onboarding-and-identity-bootstrap.md).
 
 **Key modules**:
+- `core/identity/schema.py` — IdentityProfile, DomainProfile, ProfileGap, Role, Skill
+- `core/identity/builder.py` — IdentityProfileBuilder (graph → IdentityProfile)
+- `core/onboarding/schema.py` — OnboardingQuestion, OnboardingAnswer, GapResolution
+- `core/onboarding/planner.py` — OnboardingPlanner (gap-driven question generation)
 - `core/graph/` — storage and retrieval of all identity nodes
 - `core/parts/` — IFS parts memory (subpersonalities, values, needs)
 - `core/psyche/` — PsycheState builder
@@ -61,8 +66,8 @@ persisted in SQLite and optionally Neo4j. Vector embeddings support semantic sea
 - `core/search/` — hybrid vector + keyword search
 - `core/journal/` — raw message archival (event sourcing)
 
-**Canonical node types**: PERSON, EVENT, INSIGHT, BELIEF, NEED, VALUE, GOAL, TASK,
-PROJECT, CONCEPT, EMOTION, PART, MEMORY.
+**Canonical node types**: PERSON, NOTE, EVENT, INSIGHT, BELIEF, THOUGHT, NEED, VALUE,
+TASK, PROJECT, EMOTION, PART, SOMA.
 
 ---
 
@@ -90,8 +95,8 @@ their values, beliefs, needs, parts (IFS), goals, and behavioral patterns. The i
 model is derived from the memory graph and updated continuously through inference and
 onboarding.
 
-**Current status**: Partially complete. PsycheState and IFS parts are implemented.
-Formal IdentityProfile and DomainProfile objects are planned.
+**Current status**: Complete. PsycheState, IFS parts, IdentityProfile, and DomainProfile
+are all implemented.
 
 **Key modules**:
 - `core/psyche/state.py` — PsycheState (unified snapshot)
@@ -99,6 +104,7 @@ Formal IdentityProfile and DomainProfile objects are planned.
 - `core/goals/engine.py` — goal tracking and decomposition
 - `core/neuro/engine.py` — NeuroCore (Hebbian activation model)
 - `core/prediction/state_model.py` — PsycheState prediction DTOs
+- `core/identity/` — IdentityProfile + IdentityProfileBuilder
 
 **Primary outputs**: PsycheState, active goals, dominant parts, dominant needs.
 
@@ -111,11 +117,13 @@ needs, emotional state, and value tensions into a `MotivationState` — a struct
 representation of what the user is motivated to do right now. The motivation core
 drives proactive agent behaviour.
 
-**Current status**: Initial scaffolding added. See `core/motivation/`.
+**Current status**: Complete. MotivationStateBuilder, MotivationScorer, and
+MotivationStateStore are all implemented. See `core/motivation/`.
 
 **Key modules**:
-- `core/motivation/schema.py` — MotivationState dataclass
+- `core/motivation/schema.py` — MotivationState dataclass + MotivationStateStore
 - `core/motivation/builder.py` — MotivationStateBuilder
+- `core/motivation/scoring.py` — MotivationScorer (rule-based, stateless)
 
 **Primary outputs**: MotivationState (active goals, priority signals, recommended next
 actions, action readiness).
@@ -129,8 +137,8 @@ state and the current memory/identity context. Agent actions are first-class obj
 persisted with their triggering context, motivation references, and outcomes. The agent
 core uses the OODA pipeline (Observe → Orient → Decide → Act) and a tool registry.
 
-**Current status**: OODA pipeline is complete. Formal AgentAction schema is new.
-See `core/pipeline/`, `core/tools/`, `core/agent/`.
+**Current status**: OODA pipeline is complete. AgentAction schema and persistence are
+complete. See `core/pipeline/`, `core/tools/`, `core/agent/`.
 
 **Key modules**:
 - `core/pipeline/` — OODA pipeline stages
@@ -191,12 +199,13 @@ Graph (raw nodes)
 Query (user message / planning context / reflection context)
   → ContextBuilder (session memory + persistent memory)
   → RAGRetriever (hybrid vector + keyword search)
-  → Identity weighting (relevance to active goals, dominant parts, needs)
-  → Ranked node set
+  → RetrievalScorer (7-dimensional: semantic, goal, identity, emotional, recency, confidence, relationship)
+  → RetrievalRanker (filter by confidence, sort, cap by limit)
   → Prompt injection
 ```
 
-See [docs/retrieval-strategy.md](retrieval-strategy.md) for full retrieval design.
+See [docs/retrieval-strategy.md](retrieval-strategy.md) and
+[docs/retrieval-architecture.md](retrieval-architecture.md) for full retrieval design.
 
 ### Proactive Agent Flow
 
@@ -264,15 +273,18 @@ Periodic trigger (scheduler)
 | `core/mood/` | Emotional Core | VAD mood tracking |
 | `core/analytics/` | Emotional Core | Cognitive distortion detection, graph analytics |
 | `core/therapy/` | Emotional Core | Intervention selection (CBT/ACT/IFS) |
+| `core/identity/` | Identity Core | IdentityProfile + IdentityProfileBuilder |
+| `core/onboarding/` | Bootstrapping Layer | OnboardingPlanner + gap-driven interviews |
+| `core/retrieval/` | Memory Core | Identity-aware retrieval scoring and ranking |
 | `core/psyche/` | Identity Core | PsycheState (unified snapshot) |
 | `core/parts/` | Identity Core | IFS parts memory |
 | `core/goals/` | Identity Core | Goal engine |
 | `core/neuro/` | Identity Core | NeuroCore (Hebbian activation) |
 | `core/prediction/` | Identity Core | PsycheState prediction (EWMA) |
-| `core/motivation/` | Motivation Core | MotivationState schema and builder |
+| `core/motivation/` | Motivation Core | MotivationState schema, builder, and store |
 | `core/pipeline/` | Agent Core | OODA pipeline stages |
 | `core/tools/` | Agent Core | Tool registry and built-in tools |
-| `core/agent/` | Agent Core | AgentAction schema |
+| `core/agent/` | Agent Core | AgentAction schema + persistence |
 | `agents/ifs/` | Agent Core | IFS InnerCouncil agents |
 | `core/context/` | Agent Core | Context builder |
 | `core/llm/` | Agent Core | LLM client abstraction |

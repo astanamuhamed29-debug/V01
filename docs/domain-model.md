@@ -112,8 +112,10 @@ lifecycle: active → paused → completed / abandoned.
 **Fields**: `id`, `user_id`, `title`, `description`, `status`, `priority`, `deadline`,
 `parent_goal_id`, `sub_goals`, `tasks`, `evidence_refs`, `created_at`, `updated_at`
 
-**Graph representation**: GOAL node in the knowledge graph. TASK nodes are linked to
-goals.
+**Graph representation**: Goals are **not** stored as graph nodes. They are persisted
+in the `goals` table via `GoalEngine`. Related graph nodes (projects, tasks, insights)
+reference goals through their `evidence_refs` metadata field. TASK nodes linked to a
+goal carry the `goal_id` in their metadata.
 
 **Implementation**: `core/goals/engine.py`
 
@@ -285,7 +287,7 @@ objects are computed from it and should not be stored as separate authoritative 
 | Belief | BELIEF |
 | Value | VALUE |
 | Part | PART |
-| Goal | GOAL |
+| Goal | (goals table via GoalEngine, not a graph node) |
 | Task | TASK |
 | Insight | INSIGHT |
 | EmotionState | (mood snapshot table, not a graph node) |
