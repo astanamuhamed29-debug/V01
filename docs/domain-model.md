@@ -213,8 +213,8 @@ Belief), `needs` (list of Need), `parts` (list of Part), `active_goals` (list of
 `domain_profiles` (list of DomainProfile), `completeness_score`, `created_at`,
 `updated_at`
 
-**Implementation**: Planned. Data currently spread across graph nodes. Formal
-IdentityProfile object is on the roadmap.
+**Implementation**: `core/identity/schema.py` (`IdentityProfile`). Built by
+`core/identity/builder.py` (`IdentityProfileBuilder`) from live graph nodes.
 
 ---
 
@@ -228,7 +228,8 @@ onboarding and refined continuously.
 **Fields**: `domain`, `user_id`, `knowledge_level`, `experience_years`, `preferences`,
 `goals`, `notes`, `confidence`, `created_at`, `updated_at`
 
-**Implementation**: Planned. Currently represented as tagged graph nodes.
+**Implementation**: `core/identity/schema.py` (`DomainProfile`). Populated by
+`IdentityProfileBuilder` from PROJECT, TASK, BELIEF, NEED, INSIGHT, and VALUE graph nodes.
 
 ---
 
@@ -241,11 +242,8 @@ criteria for each domain. Gaps drive adaptive interviewing in onboarding.
 **Fields**: `user_id`, `domain`, `gap_type` (e.g. "missing_value", "missing_goal",
 "low_confidence_belief"), `description`, `priority`, `detected_at`
 
-**Implementation**: Planned. See [docs/onboarding-and-identity-bootstrap.md](onboarding-and-identity-bootstrap.md).
-
----
-
-### OnboardingSession
+**Implementation**: `core/identity/schema.py` (`ProfileGap`). Generated automatically by
+`IdentityProfileBuilder` during `build()`. See [docs/onboarding-and-identity-bootstrap.md](onboarding-and-identity-bootstrap.md).
 
 A structured session in which the system acquires initial identity information from a
 new user. An onboarding session consists of multiple question/answer exchanges, each
