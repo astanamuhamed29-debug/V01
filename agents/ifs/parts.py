@@ -84,11 +84,41 @@ class CriticAgent(_BaseIFSAgent):
         "надо было", "не смог", "не смогла", "облажался", "облажалась",
     ]
 
-    async def respond(self, context: IFSAgentContext) -> IFSAgentResult:
+    async def respond(
+        self,
+        context: IFSAgentContext,
+        council_voices: list[IFSAgentResult] | None = None,
+    ) -> IFSAgentResult:
+        """Voice the Critic's perspective.
+
+        In Round 2, if ``council_voices`` contains an active ExileAgent
+        position, the Critic softens to avoid piling on pain.
+        """
         text_lower = context.text.lower()
         activated = any(t in text_lower for t in self._TRIGGERS)
 
         if activated:
+            # Round 2 adjustment: soften if Exile is in high-pain mode
+            if council_voices:
+                exile_active = any(
+                    v.part_role == "exile"
+                    and any(
+                        kw in v.voice.lower()
+                        for kw in ("боль", "страшно", "больно", "одинок")
+                    )
+                    for v in council_voices
+                )
+                if exile_active:
+                    return IFSAgentResult(
+                        part_role=self.role,
+                        voice=(
+                            "Вижу, что сейчас не время для критики. "
+                            "Чувствую боль и хочу её поддержать, а не осуждать."
+                        ),
+                        need="защита через принятие",
+                        recommendation="Отступить и дать пространство для исцеления.",
+                    )
+
             voice = (
                 "Ты снова повторяешь ту же ошибку. "
                 "Мне нужно убедиться, что ты соответствуешь стандартам — "
@@ -121,11 +151,41 @@ class FirefighterAgent(_BaseIFSAgent):
         "сбежать", "игры", "соцсети", "netflix", "youtube",
     ]
 
-    async def respond(self, context: IFSAgentContext) -> IFSAgentResult:
+    async def respond(
+        self,
+        context: IFSAgentContext,
+        council_voices: list[IFSAgentResult] | None = None,
+    ) -> IFSAgentResult:
+        """Voice the Firefighter's perspective.
+
+        In Round 2, if ``council_voices`` contains an active ExileAgent,
+        the Firefighter's urgency increases.
+        """
         text_lower = context.text.lower()
         activated = any(t in text_lower for t in self._TRIGGERS)
 
         if activated:
+            # Round 2 adjustment: increase urgency when Exile is active
+            if council_voices:
+                exile_active = any(
+                    v.part_role == "exile"
+                    and any(
+                        kw in v.voice.lower()
+                        for kw in ("боль", "страшно", "больно", "одинок")
+                    )
+                    for v in council_voices
+                )
+                if exile_active:
+                    return IFSAgentResult(
+                        part_role=self.role,
+                        voice=(
+                            "Изгнанник страдает — мне нужно действовать немедленно. "
+                            "Дать ему хоть какое-то облегчение прямо сейчас!"
+                        ),
+                        need="срочное облегчение боли",
+                        recommendation="Краткосрочная разгрузка для снижения боли Изгнанника.",
+                    )
+
             voice = (
                 "Мне нужно было дать тебе передышку прямо сейчас — "
                 "боль была слишком сильной, а ты не мог остановиться сам."
@@ -157,11 +217,41 @@ class ExileAgent(_BaseIFSAgent):
         "не принимают", "плохой", "плохая", "недостоин", "недостойна",
     ]
 
-    async def respond(self, context: IFSAgentContext) -> IFSAgentResult:
+    async def respond(
+        self,
+        context: IFSAgentContext,
+        council_voices: list[IFSAgentResult] | None = None,
+    ) -> IFSAgentResult:
+        """Voice the Exile's perspective.
+
+        In Round 2, if ``council_voices`` contains a dominant Critic,
+        the Exile's need for safety increases.
+        """
         text_lower = context.text.lower()
         activated = any(t in text_lower for t in self._TRIGGERS)
 
         if activated:
+            # Round 2 adjustment: amplify safety need when Critic dominated
+            if council_voices:
+                critic_active = any(
+                    v.part_role == "critic"
+                    and any(
+                        kw in v.voice.lower()
+                        for kw in ("ошибку", "стандарт", "рухнет", "снова")
+                    )
+                    for v in council_voices
+                )
+                if critic_active:
+                    return IFSAgentResult(
+                        part_role=self.role,
+                        voice=(
+                            "Критик давит на меня. "
+                            "Мне нужна безопасность и принятие, а не ещё больше осуждения."
+                        ),
+                        need="безопасность и защита от критики",
+                        recommendation="Сначала создать безопасное пространство, потом работать над ошибками.",
+                    )
+
             voice = (
                 "Мне больно и страшно. Я просто хочу, чтобы меня увидели "
                 "и приняли таким, какой я есть."

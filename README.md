@@ -1,10 +1,21 @@
 # SELF-OS — Personal Cognitive Operating System
 
-**Stage 1: Knowledge Graph Core — Complete**
+**Stage 3: Agentic Functions — Stable**
 
 SELF-OS is an AI-powered personal cognitive operating system that builds and maintains a semantic knowledge graph from natural conversations. It models identity, emotions, beliefs, needs, and behavioral patterns — enabling deep self-awareness and intelligent assistance.
 
-## Recent Updates (March 2026)
+## Recent Updates (March 2026 — Stage 3 Stabilization)
+
+- **InnerCouncil** (`agents/ifs/`) — genuine 2-round IFS debate: each Part agent reacts to peers in Round 2 (Critic softens when Exile in pain, Exile amplifies safety need when Critic dominant, Firefighter raises urgency when Exile active).
+- **PredictiveEngine** (`core/prediction/`) — EWMA forecasting with `PsycheState` / `PsycheStateForecast` / `InterventionImpact` DTOs using only public `GraphStorage` APIs.
+- **Shared IFS signals** (`agents/ifs/signals.py`) — single source of truth for `PART_SIGNALS`/`EMOTION_SIGNALS` used by both InnerCouncil and AgentOrchestrator.
+- **AgentOrchestrator wired** — `MessageProcessor` accepts optional `orchestrator` param; results merged into `graph_context` after DECIDE.
+- **Background brain_state** — `_process_background()` injects NeuroCore brain state into graph context when `neuro_bridge` is available.
+- **PsycheState ↔ BrainState** bidirectional conversion via `from_brain_state()` / `to_brain_state()` in both `core/psyche/state.py` and `core/prediction/state_model.py`.
+- **NeuroCore performance** — Hebbian strengthening O(n²) → O(1) SQL; `propagate()` iterative BFS; `decay_cycle()` skips dormant neurons; new `cleanup_dormant()`.
+- **`intervention_outcomes`** DDL + public `get_avg_intervention_delta()` in `GraphStorage`.
+
+## Previous Updates (March 2026)
 
 - Added **L2 AnalysisEngine** (`core/analytics/analysis_engine.py`) with strict schema validation, fallback safety path, and fusion/provenance outputs.
 - Implemented **true hybrid fusion** (semantic + statistical) with pair deduplication, merged evidence refs, and conflict-aware direction handling.

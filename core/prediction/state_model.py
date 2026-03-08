@@ -14,6 +14,10 @@ into an SSM / Mamba-based predictive model.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.neuro.schema import BrainState
 
 
 @dataclass
@@ -79,6 +83,62 @@ class PsycheState:
 
     # ---- Meta --------------------------------------------------------------
     abstraction_level: int = 0  # 0=raw, 1=episodic, 2=semantic
+
+    # ---- Prediction extras (for EWMA / snapshot extraction) ----------------
+    stressor_tags: list[str] = field(default_factory=list)
+    cognitive_load: float = 0.0
+    dominant_need: str | None = None
+
+    # ── Bidirectional conversion with BrainState ──────────────────────────
+
+    @classmethod
+    def from_brain_state(
+        cls,
+        brain_state: "BrainState",
+    ) -> "PsycheState":
+        """Create a :class:`PsycheState` from a :class:`~core.neuro.schema.BrainState`.
+
+        Mapping:
+            ``emotional_valence`` → ``valence``
+            ``emotional_arousal``  → ``arousal``
+            ``active_parts``       → ``active_parts`` (as ``{"key": p}`` dicts)
+            ``active_needs``       → ``stressor_tags``
+            ``cognitive_load``     → ``cognitive_load``
+        """
+        from datetime import UTC, datetime
+
+        now = datetime.now(UTC).isoformat()
+        return cls(
+            user_id=brain_state.user_id,
+            timestamp=brain_state.timestamp or now,
+            valence=brain_state.emotional_valence,
+            arousal=brain_state.emotional_arousal,
+            active_parts=[{"key": p} for p in brain_state.active_parts],
+            stressor_tags=list(brain_state.active_needs),
+            cognitive_load=brain_state.cognitive_load,
+            dominant_need=brain_state.active_needs[0] if brain_state.active_needs else None,
+        )
+
+    def to_brain_state(self) -> "BrainState":
+        """Convert back to a :class:`~core.neuro.schema.BrainState`."""
+        from core.neuro.schema import BrainState as BS
+
+        active_parts: list[str] = []
+        for p in self.active_parts:
+            if isinstance(p, dict):
+                active_parts.append(p.get("key") or p.get("subtype") or "")
+            else:
+                active_parts.append(str(p))
+
+        return BS(
+            user_id=self.user_id,
+            timestamp=self.timestamp,
+            emotional_valence=self.valence,
+            emotional_arousal=self.arousal,
+            active_parts=[p for p in active_parts if p],
+            active_needs=list(self.stressor_tags),
+            cognitive_load=self.cognitive_load,
+        )
 
 
 @dataclass
