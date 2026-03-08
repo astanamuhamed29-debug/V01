@@ -111,3 +111,22 @@ class AgentAction:
         self.status = "failed"
         if reason:
             self.explanation = reason
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AgentAction:
+        """Deserialise from a plain dict (inverse of :meth:`to_dict`)."""
+        return cls(
+            id=data["id"],
+            user_id=data["user_id"],
+            action_type=data["action_type"],
+            title=data["title"],
+            timestamp=data.get("timestamp", datetime.now(UTC).isoformat()),
+            description=data.get("description", ""),
+            status=data.get("status", "planned"),
+            triggered_by=data.get("triggered_by", "user_message"),
+            motivation_refs=list(data.get("motivation_refs", [])),
+            memory_refs=list(data.get("memory_refs", [])),
+            tool_calls=list(data.get("tool_calls", [])),
+            result=data.get("result"),
+            explanation=data.get("explanation", ""),
+        )
