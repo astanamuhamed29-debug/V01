@@ -457,6 +457,12 @@ class MessageProcessor:
         source: str = "cli",
         timestamp: str | None = None,
     ) -> ProcessResult:
+        """Backward-compatible alias for :meth:`process_message`.
+
+        .. deprecated::
+            Use ``await processor.process_message(user_id, text, source=source)``
+            directly.  This alias will be removed in a future release.
+        """
         return await self.process_message(user_id=user_id, text=text, source=source, timestamp=timestamp)
 
     async def build_weekly_report(self, user_id: str) -> str:

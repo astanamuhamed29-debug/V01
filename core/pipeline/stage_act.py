@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 import os
 
-from core.pipeline.reply_minimal import generate_reply
+from core.pipeline.template_reply import render_template_reply
 from core.context.session_memory import SessionMemory
 from core.graph.model import Edge, Node
 from core.llm_client import LLMClient
@@ -55,7 +55,9 @@ class ActStage:
         session_ctx = self.session_memory.get_context(user_id)
 
         effective_intent = intent if intent != "UNKNOWN" else "REFLECTION"
-        reply_text = generate_reply(
+        # render_template_reply is the LLM-free fallback; live_reply (below) takes
+        # precedence when the LLM call succeeds.
+        reply_text = render_template_reply(
             text=text,
             intent=effective_intent,
             extracted_structures={
