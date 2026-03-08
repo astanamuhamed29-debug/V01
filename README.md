@@ -327,6 +327,14 @@ V01/
 | [docs/retrieval-architecture.md](docs/retrieval-architecture.md) | Retrieval pipeline (scorer, ranker, modes) and long-term direction |
 | [docs/scoring-model.md](docs/scoring-model.md) | Seven-dimension retrieval scoring model, weights, and rationale |
 
+**Architecture Decision Records** (in [`docs/adr/`](docs/adr/)):
+
+| Document | Description |
+|---|---|
+| [docs/adr/001-layered-architecture.md](docs/adr/001-layered-architecture.md) | Layered architecture with downward-only dependency rule |
+| [docs/adr/002-sqlite-as-primary-store.md](docs/adr/002-sqlite-as-primary-store.md) | SQLite as primary store with optional Neo4j / Qdrant |
+| [docs/adr/003-psychestate-as-universal-state-contract.md](docs/adr/003-psychestate-as-universal-state-contract.md) | PsycheState as the universal agent state contract |
+
 **Product and reference documents** (strategic and market context):
 
 | Document | Description |
@@ -354,6 +362,11 @@ ruff check .
 ```
 
 ### Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contribution guide, including
+code standards, testing requirements, and PR conventions.
+
+Quick summary:
 
 1. Fork → feature branch → PR against `main`
 2. All tests must pass (`pytest`)
